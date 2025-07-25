@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(powershell:*)",
+      "Bash(copy:*)",
+      "Bash(cp:*)",
+      "Bash(npm run dev:*)",
+      "Bash(where node)",
+      "Bash(rm:*)",
+      "Bash(npm install)"
+    ],
+    "deny": []
+  }
+}

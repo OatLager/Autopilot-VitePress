@@ -1,0 +1,27 @@
+{
+  "name": "vitepress-project",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vitepress dev docs",
+    "build": "vitepress build docs",
+    "serve": "vitepress serve docs"
+  },
+  "devDependencies": {
+    "@rollup/rollup-win32-x64-msvc": "^4.45.1",
+    "vitepress": "^1.6.3",
+    "vue": "^3.5.18"
+  },
+  "pnpm": {
+    "peerDependencyRules": {
+      "ignoreMissing": [
+        "@algolia/client-search"
+      ]
+    }
+  },
+  "dependencies": {
+    "markdown-it-mermaid": "^0.2.5",
+    "mermaid": "^11.9.0",
+    "vitepress-plugin-mermaid": "^2.0.17"
+  }
+}

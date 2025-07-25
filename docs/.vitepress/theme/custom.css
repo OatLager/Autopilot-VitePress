@@ -1,0 +1,77 @@
+/* 커스텀 스타일 */
+
+/* 사이드바 타이틀 클릭 이벤트 오버라이드를 위한 스크립트 */
+.VPNavBarTitle .title,
+.VPSidebar .title {
+  cursor: pointer;
+}
+
+/* JavaScript로 링크 변경 */
+script {
+  display: none;
+}
+
+/* 헤딩 접기 기능 스타일 */
+.collapsible-heading {
+  cursor: pointer;
+  position: relative;
+  user-select: none;
+  transition: all 0.2s ease;
+}
+
+.collapsible-heading:hover {
+  color: var(--vp-c-brand);
+}
+
+.collapsible-heading::before {
+  content: "▼";
+  margin-right: 8px;
+  font-size: 0.8em;
+  color: var(--vp-c-text-2);
+  transition: transform 0.3s ease;
+  display: inline-block;
+}
+
+.collapsible-heading.collapsed::before {
+  transform: rotate(-90deg);
+}
+
+.section-content {
+  transition: all 0.3s ease;
+  overflow: hidden;
+}
+
+.section-content.collapsed {
+  display: none;
+}
+
+/* h2와 h3 헤딩 색상 변경 */
+.vp-doc h2 {
+  /* color: #f97316; */
+  border-bottom: none;
+}
+
+.vp-doc h3 {
+  color: #059669; /* 초록색 */
+}
+
+/* h2 접기 기능 스타일 */
+.vp-doc h2.collapsible-heading {
+  padding-bottom: 8px;
+  margin-bottom: 16px;
+}
+
+.vp-doc h2.collapsible-heading::before {
+  color: var(--vp-c-brand);
+  font-weight: bold;
+}
+
+/* 깜빡임 방지 - 로딩 중 일시적으로 투명도 줄이기 */
+.vp-doc h2:not(.collapsible-heading) {
+  opacity: 0.8;
+  transition: opacity 0.3s ease;
+}
+
+.vp-doc h2.collapsible-heading {
+  opacity: 1;
+}
