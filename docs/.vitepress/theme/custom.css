@@ -75,3 +75,60 @@ script {
 .vp-doc h2.collapsible-heading {
   opacity: 1;
 }
+
+/* 홈페이지 기능 카드 스타일 */
+.VPFeatures .VPFeature {
+  cursor: pointer;
+  transition: all 0.3s ease;
+  border: 1px solid var(--vp-c-border);
+  border-radius: 12px;
+  padding: 24px;
+  background: var(--vp-c-bg-soft);
+}
+
+.VPFeatures .VPFeature:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.1);
+  border-color: var(--vp-c-brand);
+}
+
+.VPFeatures .VPFeature .icon {
+  font-size: 2.5em;
+  margin-bottom: 16px;
+}
+
+.VPFeatures .VPFeature .title {
+  font-size: 1.4em;
+  font-weight: 600;
+  margin-bottom: 12px;
+  color: var(--vp-c-text-1);
+}
+
+.VPFeatures .VPFeature .details {
+  color: var(--vp-c-text-2);
+  line-height: 1.6;
+  margin-bottom: 16px;
+}
+
+.VPFeatures .VPFeature .link-text {
+  color: var(--vp-c-brand);
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.VPFeatures .VPFeature.coming-soon {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+.VPFeatures .VPFeature.coming-soon:hover {
+  transform: none;
+  box-shadow: none;
+  border-color: var(--vp-c-border);
+}
+
+.VPFeatures .VPFeature.coming-soon .link-text {
+  color: var(--vp-c-text-3);
+}

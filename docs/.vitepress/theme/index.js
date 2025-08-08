@@ -7,17 +7,26 @@ export default {
     if (typeof window !== 'undefined') {
       // 페이지 로드 후 실행
       router.onAfterRouteChanged = () => {
-        setTimeout(addCollapsibleFeature, 100)
+        setTimeout(() => {
+          addCollapsibleFeature()
+          addHomePageFeatureClicks()
+        }, 100)
       }
       
       // 초기 로드
       if (typeof document !== 'undefined') {
         if (document.readyState === 'loading') {
           document.addEventListener('DOMContentLoaded', () => {
-            setTimeout(addCollapsibleFeature, 100)
+            setTimeout(() => {
+              addCollapsibleFeature()
+              addHomePageFeatureClicks()
+            }, 100)
           })
         } else {
-          setTimeout(addCollapsibleFeature, 100)
+          setTimeout(() => {
+            addCollapsibleFeature()
+            addHomePageFeatureClicks()
+          }, 100)
         }
       }
     }
@@ -148,4 +157,64 @@ function toggleSection(heading) {
     })
     console.log('Section collapsed')
   }
+}
+
+function addHomePageFeatureClicks() {
+  // 홈페이지인지 확인
+  if (window.location.pathname !== '/' && window.location.pathname !== '/index.html') {
+    return
+  }
+  
+  console.log('Adding homepage feature clicks...')
+  
+  // 기능 카드들 찾기
+  const features = document.querySelectorAll('.VPFeatures .VPFeature')
+  console.log('Found feature cards:', features.length)
+  
+  features.forEach((feature, index) => {
+    const title = feature.querySelector('.title')?.textContent
+    console.log(`Processing feature ${index + 1}:`, title)
+    
+    // 데이터 속성으로 링크 정보 설정
+    const links = [
+      '/version/main/introduction/about', // Autopilot
+      '#', // GCS - Coming Soon
+      '#', // Log Review - Coming Soon  
+      '#'  // Simulation - Coming Soon
+    ]
+    
+    const linkTexts = [
+      'Get Started →',
+      'Coming Soon',
+      'Coming Soon', 
+      'Coming Soon'
+    ]
+    
+    const link = links[index]
+    const linkText = linkTexts[index]
+    
+    // Coming Soon 카드는 클릭 불가능하도록 설정
+    if (link === '#') {
+      feature.classList.add('coming-soon')
+      feature.style.cursor = 'not-allowed'
+    } else {
+      feature.style.cursor = 'pointer'
+      
+      // 클릭 이벤트 추가
+      feature.addEventListener('click', (e) => {
+        e.preventDefault()
+        console.log(`Feature clicked: ${title}, navigating to: ${link}`)
+        window.location.href = link
+      })
+    }
+    
+    // 링크 텍스트 추가
+    const details = feature.querySelector('.details')
+    if (details && !feature.querySelector('.link-text')) {
+      const linkElement = document.createElement('div')
+      linkElement.className = 'link-text'
+      linkElement.textContent = linkText
+      details.parentNode.appendChild(linkElement)
+    }
+  })
 }

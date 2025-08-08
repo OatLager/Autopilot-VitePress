@@ -13,7 +13,7 @@ export default withMermaid(
     themeConfig: {
       logo: '/logo.png', // public 폴더에 로고 파일 추가
       siteTitle: 'Autopilot CORE', // 로고와 타이틀 함께 표시
-      logoLink: '/version/main/introduction/about',
+      logoLink: 'index.md',
       search: {
         provider: 'local',
         options: {
