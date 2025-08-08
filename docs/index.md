@@ -6,22 +6,25 @@ hero:
   text: "Advanced Flight Control System"
   tagline: "Complete documentation and tools for drone development and analysis"
   image:
-    src: /logo.png
+    src: /drone.png
     alt: Autopilot CORE
 
 features:
-  - icon: 🚁
-    title: Autopilot
-    details: Complete PX4 autopilot documentation including system architecture, modules, MAVLink protocol, and safety systems
+  - icon:
+      src: /autopilot-core.png
+      width: 512
+      height: 512
+    title: Autopilot CORE
+    details: Complete Autopilot CORE documentation including system architecture, modules, MAVLink protocol, and safety systems
     link: /version/main/introduction/about
-    linkText: Get Started →
+    linkText: Get Started
   - icon: 🎮
     title: GCS
     details: Ground Control Station software for mission planning, real-time monitoring, and vehicle configuration
     link: #
     linkText: Coming Soon
   - icon: 📊
-    title: Log Review
+    title: Log Viewer
     details: Flight log analysis tools and techniques for performance evaluation and troubleshooting
     link: #
     linkText: Coming Soon

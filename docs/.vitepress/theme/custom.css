@@ -132,3 +132,28 @@ script {
 .VPFeatures .VPFeature.coming-soon .link-text {
   color: var(--vp-c-text-3);
 }
+
+/* Hero 이미지 크기 조정 및 스타일링 */
+.VPHero .VPImage {
+  max-width: 700px !important;
+  max-height: 700px !important;
+}
+
+.VPHero .VPImage img {
+  width: 100% !important;
+  height: auto !important;
+  max-width: 600px !important;
+  
+  /* 배경 블렌딩 효과 */
+  border-radius: 20px;
+  mix-blend-mode: multiply;
+  filter: drop-shadow(0 10px 20px rgba(0, 0, 0, 0.15));
+  
+  /* 부드러운 애니메이션 */
+  transition: transform 0.3s ease, box-shadow 0.3s ease;
+}
+
+.VPHero .VPImage img:hover {
+  transform: scale(1.05);
+  box-shadow: 0 30px 60px rgba(0, 0, 0, 0.15);
+}

@@ -179,14 +179,14 @@ function addHomePageFeatureClicks() {
     const links = [
       '/version/main/introduction/about', // Autopilot
       '#', // GCS - Coming Soon
-      '#', // Log Review - Coming Soon  
+      'http://192.168.21.35:5000', // Log Review Python App
       '#'  // Simulation - Coming Soon
     ]
     
     const linkTexts = [
       'Get Started →',
       'Coming Soon',
-      'Coming Soon', 
+      'Launch App →', // Log Review
       'Coming Soon'
     ]
     
@@ -204,7 +204,14 @@ function addHomePageFeatureClicks() {
       feature.addEventListener('click', (e) => {
         e.preventDefault()
         console.log(`Feature clicked: ${title}, navigating to: ${link}`)
-        window.location.href = link
+        
+        // 외부 링크는 새 탭에서 열기
+        if (link.startsWith('http')) {
+          window.open(link, '_blank')
+        } else {
+          // 내부 링크는 같은 탭에서 이동
+          window.location.href = link
+        }
       })
     }
     

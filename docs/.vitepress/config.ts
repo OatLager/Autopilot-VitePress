@@ -11,9 +11,13 @@ export default withMermaid(
       ['link', { rel: 'icon', href: '/logo.png' }]
     ],
     themeConfig: {
-      logo: '/logo.png', // public 폴더에 로고 파일 추가
+      logo: '/logo.png', // 타이틀 로고는 원래대로
       siteTitle: 'Autopilot CORE', // 로고와 타이틀 함께 표시
-      logoLink: 'index.md',
+      logoLink: '/',
+      footer: {
+        message: 'Released under the MIT License.',
+        copyright: 'Copyright © 2025 Autopilot CORE'
+      },
       search: {
         provider: 'local',
         options: {
