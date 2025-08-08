@@ -55,12 +55,12 @@ flowchart LR
     C --> D[rcS 스크립트 실행]
 ```
 
-#### SITL 실행
+#### Step 01 : SITL 실행
    - `make px4_sitl XXXX(대상)` 명령어 실행
 
 ---
 
-#### 메인 프로세스 시작
+#### Step 02 :  메인 프로세스 시작
   - 파일: `platforms/posix/src/px4/common/main.cpp`
   - 핵심 함수: `main(int argc, char **argv)`
   - 아키텍처: 데몬/서버 구조 (하나의 서버, 다수의 클라이언트)
@@ -74,13 +74,13 @@ flowchart LR
 
 ---
 
-#### WorkQueue 시작
+#### Step 03 : WorkQueue 시작
    - 호출 경로: `main()` → `px4::init_once()` → `px4_platform_init()` → `px4::WorkQueueManagerStart()`
    - 설명: SITL 환경에서 백그라운드 작업 처리를 위한 WorkQueue 시스템 시작
 
 ---
 
-#### rcS 스크립트 실행
+#### Step 04 : rcS 스크립트 실행
    - `main()` 함수에서 `run_startup_script()` 호출로 rcS 스크립트 실행
    - 파일: `ROMFS/px4fmu_common/init.d-posix/rcS`
 
@@ -96,12 +96,12 @@ flowchart LR
     D --> E[rcS 스크립트 실행]
 ```
 
-#### 타겟 보드 부팅
+#### Step 01 : 타겟 보드 부팅
   - 타겟 보드에 전원 인가
 
 ---
 
-#### 하드웨어 초기화
+#### Step 02 : 하드웨어 초기화
 
 1. **벡터 테이블 초기화**
   - 파일: `platforms/nuttx/NuttX/nuttx/arch/arm/src/armv7-m/arm_vectors.c`
@@ -120,7 +120,7 @@ flowchart LR
 
 ---
 
-#### OS 시작
+#### Step 03 : OS 시작
 1. **OS 커널 시작**
   - 파일: `platforms/nuttx/NuttX/nuttx/sched/init/nx_start.c`
   - 핵심 함수: `nx_start(void)`
@@ -141,14 +141,14 @@ flowchart LR
 
 ---
 
-#### WorkQueue 시작
+#### Step 04 : WorkQueue 시작
 - 파일: `boards/px4/fmu-v6x/src/init.c` + `platforms/nuttx/src/px4/common/px4_init.cpp`
 - 호출 경로: `nx_bringup()` → `board_app_initialize()` → `px4_platform_init()` → `px4::WorkQueueManagerStart()`
 - 설명: PX4 플랫폼별 초기화 및 WorkQueue 시스템 시작. rcS 스크립트 실행 전에 필요한 백그라운드 작업 처리 시스템을 준비
 
 ---
 
-#### rcS 스크립트 실행
+#### Step 05 : rcS 스크립트 실행
 - 파일: `ROMFS/px4fmu_common/init.d/rcS`
 - 실행 과정:
   1. NSH가 시작되면서 `/etc/init.d/rcS` 파일 존재 확인

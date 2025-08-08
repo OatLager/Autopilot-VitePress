@@ -4,7 +4,7 @@ import { withMermaid } from "vitepress-plugin-mermaid"
 // https://vitepress.vuejs.org/config/app-configs
 export default withMermaid(
   defineConfig({
-    title: 'Document Viewer',
+    title: 'Autopilot CORE',
     description: 'A simple document viewer',
     titleTemplate: false,
     head: [
@@ -12,7 +12,7 @@ export default withMermaid(
     ],
     themeConfig: {
       logo: '/logo.png', // public 폴더에 로고 파일 추가
-      siteTitle: 'Document Viewer', // 로고와 타이틀 함께 표시
+      siteTitle: 'Autopilot CORE', // 로고와 타이틀 함께 표시
       logoLink: '/version/main/introduction/about',
       search: {
         provider: 'local',
@@ -49,44 +49,93 @@ export default withMermaid(
       sidebar: {
         '/version/main/': [
           {
-            text: 'Introduction',
-            collapsible: true,
-            collapsed: false,
+            text: 'Introduction', collapsible: true, collapsed: false,
             items: [
-              { text: 'About', link: '/version/main/introduction/about' }
+              { text: '- About', link: '/version/main/introduction/about' }
             ]
           },
           {
-            text: 'Concepts',
-            collapsible: true,
-            collapsed: false,
+            text: 'Concepts', collapsible: true, collapsed: false,
             items: [
               {
-                text: 'System',
-                collapsible: true,
-                collapsed: false,
+                text: '- System', collapsible: true, collapsed: false,
                 items: [
-                  { text: '01 - Build Sequence', link: '/version/main/concepts/system/build_sequence' },
-                  { text: '02 - Startup Sequence', link: '/version/main/concepts/system/startup_sequence' }
+                  { text: 'Build Sequence', link: '/version/main/concepts/system/build_sequence' },
+                  { text: 'Startup Sequence', link: '/version/main/concepts/system/startup_sequence' }
                 ]
               },
               {
-                text: 'Modules',
-                collapsible: true,
-                collapsed: false,
+                text: '- Modules', collapsible: true, collapsed: false,
                 items: [
-                  { text: '01 - Thread', link: '/version/main/concepts/modules/module_system' },
-                  { text: '02 - Module', link: '/version/main/concepts/modules/work_queue' }
+                  { text: 'Thread', link: '/version/main/concepts/modules/thread' },
+                  { text: 'WorkQueue Module', collapsible : true, collapsed: false, link: '/version/main/concepts/modules/workqueue/main',
+                    items: [
+                      { text: 'about WorkQueue', link: '/version/main/concepts/modules/workqueue/about_workqueue'},
+                      { text: 'custom Module', link: '/version/main/concepts/modules/workqueue/custom_module'}  
+                     ]
+                  },
+                  { text: 'Standalone Module', link: '/version/main/concepts/modules/module_taskspawn' }
                 ]
               }
             ]
           },
           {
-            text: 'Documentation',
-            collapsible: true,
-            collapsed: true,
+            text: 'MAVLink', collapsible: true, collapsed: true,
             items: [
-              { text: 'Style Guide', link: '/version/main/documentation/style_guide' }
+              { text: '- MSG List', link: '/version/main/mavlink/ing' },
+              { text: 'Overview', link: '/version/main/mavlink/overview' },
+              { text: 'Concept', link: '/version/main/mavlink/concept' },
+              { text: 'Implementation', link: '/version/main/mavlink/implementation' }
+            ]
+          },
+          {
+            text: 'Commander', collapsible: true, collapsed: true,
+            items: [
+              { text: '- FailSafe', collapsible: true, collapsed: true,
+                items: [
+                  { text: 'Overview', link: '/version/main/commander/failsafe/overview' },
+                  { text: 'Concept', link: '/version/main/commander/failsafe/concept' },
+                  { text: 'Implementation', link: '/version/main/commander/failsafe/implementation' },
+                  { text: 'Verification', collapsible: true, collapsed: true,
+                    items: [
+                      { text: 'Static Analysis', link: '/version/main/commander/failsafe/verification/static_analysis' },
+                      { text: 'Dynamic Analysis', link: '/version/main/commander/failsafe/verification/dynamic_analysis' }                    ]
+                  }
+                ]
+              },
+              { text: '- FailureDetector', collapsible: true, collapsed: true,
+                items: [
+                  { text: 'Overview', link: '/version/main/commander/failure_detector/overview' },
+                  { text: 'Concept', link: '/version/main/commander/failure_detector/concept' },
+                  { text: 'Implementation', link: '/version/main/commander/failure_detector/implementation' },
+                  { text: 'Verification', collapsible: true, collapsed: true,
+                    items: [
+                      { text: 'Static Analysis', link: '/version/main/commander/failure_detector/verification/static_analysis' },
+                      { text: 'Dynamic Analysis', link: '/version/main/commander/failure_detector/verification/dynamic_analysis' }                    ]
+                  }
+                ]
+              },
+              { text: '- ModeManagement', collapsible: true, collapsed: true,
+                items: [
+                  { text: 'ModeManagement', link: '/version/main/commander/mode_management/ing' }
+                ]
+              },
+            ]
+          },
+          {
+            text: 'Simulation', collapsible: true, collapsed: true,
+            items: [
+              { text: '- Simulation-In-Hardware', collapsible: true, collapsed: true, link: '/version/main/simulation/simulation-in-hardware/main',
+                items: [
+                  { text: 'SIH Start', link: '/version/main/simulation/simulation-in-hardware/sih_start'}
+                ]
+               }
+            ]
+          },
+          {
+            text: 'Documentation', collapsible: true, collapsed: true,
+            items: [
+              { text: '- Style Guide', link: '/version/main/documentation/style_guide' }
             ]
           }
         ]
