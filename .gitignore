@@ -63,3 +63,8 @@ temp/
 
 # Exclude source files
 src/
+
+# Exclude Claude configuration files
+.claude/
+CLAUDE.md
+.mcp.json
