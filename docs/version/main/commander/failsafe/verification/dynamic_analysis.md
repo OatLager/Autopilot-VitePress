@@ -1,23 +1,210 @@
-# Failsafe 모듈 분기문 분석 및 분류
+# Failsafe Dynamic Analysis
 
-## 개요
-- **목적**: PX4 Failsafe 모듈의 100% 분기 커버리지 분석
-- **범위**: failsafe.cpp와 framework.cpp의 모든 분기문, 조건문, 함수 커버
-- **분석 방법**: 레벨별 중첩 구조 분석 및 분기 의존성 매핑
+## 1. 기능 구성 File/CLASS/Function 관계
 
-## 1. 분기문 분석 및 분류
+### 1.1 파일 구조
 
-### 1.1 Failsafe 클래스 분기문
+- **failsafe.h**: Failsafe 클래스 정의 및 인터페이스 선언
+- **failsafe.cpp**: Failsafe 클래스 구현 및 로직
+- **framework.h**: FailsafeBase 기본 프레임워크 클래스 정의
+- **framework.cpp**: FailsafeBase 프레임워크 구현
 
-#### A. Parameter 변환 함수들 (L1 단계)
-이 함수들은 파라미터 값을 ActionOptions로 변환하는 switch문 구조를 가집니다.
+### 1.2 클래스 관계도
 
-##### A.1 fromNavDllOrRclActParam() - GCS/RC 연결 손실 처리
+```
+Commander (src/modules/commander/Commander.hpp)
+    └─ Failsafe (failsafe/failsafe.h)
+        ├─ FailsafeBase (framework.h) [상속]
+        │   └─ ModuleParams [상속]
+        └─ 각종 enum 클래스들
+            ├─ LowBatteryAction
+            ├─ offboard_loss_failsafe_mode
+            ├─ actuator_failure_failsafe_mode
+            ├─ geofence_violation_action
+            └─ 기타 failsafe 모드들
+```
+
+### 1.3 주요 구성 요소
+
+- **Failsafe**: 메인 클래스, PX4 특화 failsafe 로직 구현
+- **FailsafeBase**: 기본 프레임워크, 공통 failsafe 동작 제공
+- **Action enum**: failsafe 액션 정의 (None, Warn, Hold, RTL, Land, Terminate 등)
+- **ActionOptions struct**: 각 failsafe 조건에 대한 액션 옵션
+- **State struct**: 드론의 현재 상태 정보
+
+### 1.4 메인 함수 호출 관계
+
+```
+Commander::run()
+    ├─ Failsafe::update() [주 진입점]
+    │   ├─ FailsafeBase::update() [framework.cpp:53]
+    │   │   ├─ checkStateAndMode() [가상함수, failsafe.cpp에서 구현]
+    │   │   ├─ removeNonActivatedActions()
+    │   │   ├─ getSelectedAction()
+    │   │   ├─ updateStartDelay()
+    │   │   └─ notifyUser()
+    │   └─ Failsafe::checkStateAndMode() [failsafe.cpp:398]
+    │       ├─ updateArmingState()
+    │       ├─ CHECK_FAILSAFE 매크로 호출들
+    │       │   ├─ manual_control_signal_lost 검사
+    │       │   ├─ gcs_connection_lost 검사
+    │       │   ├─ battery_warning 검사
+    │       │   ├─ geofence_breached 검사
+    │       │   ├─ mission_failure 검사
+    │       │   ├─ fd_critical_failure 검사
+    │       │   ├─ wind_limit_exceeded 검사
+    │       │   └─ flight_time_limit_exceeded 검사
+    │       └─ checkModeFallback() [모드 폴백 검사]
+    └─ 상태 조회 함수들 [독립 호출]
+        ├─ selectedAction()
+        ├─ inFailsafe()
+        └─ userTakeoverActive()
+```
+
+### 1.5 독립적 수행 함수
+
+- **FailsafeBase::update()**: Commander 모듈에서 호출, 전체 failsafe 상태 머신 업데이트
+- **상태 조회 함수들**: Commander에서 현재 failsafe 상태 확인용
+- **Static 변환 함수들**: 파라미터 값을 ActionOptions로 변환
+
+### 1.6 주요 시나리오 분류
+
+1. **Manual Control Loss 시나리오**: RC 신호 손실 처리
+2. **GCS Connection Loss 시나리오**: 지상 제어소 연결 손실 처리
+3. **Battery Warning 시나리오**: 배터리 경고/위험/응급 상태 처리
+4. **Geofence Violation 시나리오**: 지오펜스 위반 처리
+5. **Mission Failure 시나리오**: 미션 실패 처리
+6. **Critical System Failure 시나리오**: 중요 시스템 고장 처리
+7. **Wind/Flight Time Limit 시나리오**: 바람/비행시간 제한 초과 처리
+8. **Mode Fallback 시나리오**: 모드 폴백 처리
+9. **User Takeover 시나리오**: 사용자 수동 접수 처리
+
+:::tip 상태 조회 함수들(selectedAction, inFailsafe, userTakeoverActive)은 Commander에서 자동으로 호출되며 분기가 없어 100% 커버리지를 달성하므로 별도의 테스트 케이스가 필요하지 않음.
+:::
+
+## 2. 함수별 분기 확인
+
+### 2.1 전체 분기 목록 요약
+
+:::details 전체 분기 목록 표
+
+| No | 함수명                        | 분기 ID | 레벨 | 라인 | 분기 조건                                                     | 설명                           |
+| -- | ----------------------------- | ------- | ---- | ---- | ------------------------------------------------------------- | ------------------------------ |
+| 1  | selectedAction()              | -       | L0   | 152  | return _selected_action                                       | 단순 반환                      |
+| 2  | inFailsafe()                  | -       | L0   | 150  | return (_selected_action != None && _selected_action != Warn) | 단순 비교 반환                 |
+| 3  | userTakeoverActive()          | -       | L0   | 156  | return _user_takeover_active                                  | 단순 반환                      |
+| 4  | fromNavDllOrRclActParam()     | FS_N_01 | L1   | 47   | switch(gcs_connection_loss_failsafe_mode)                     | GCS 연결손실 모드 분기         |
+| 5  | fromNavDllOrRclActParam()     | FS_N_02 | L2   | 48   | case Disabled                                                 | 비활성화 케이스                |
+| 6  | fromNavDllOrRclActParam()     | FS_N_03 | L2   | 52   | case Hold_mode                                                | Hold 모드 케이스               |
+| 7  | fromNavDllOrRclActParam()     | FS_N_04 | L2   | 56   | case Return_mode                                              | Return 모드 케이스             |
+| 8  | fromNavDllOrRclActParam()     | FS_N_05 | L2   | 61   | case Land_mode                                                | Land 모드 케이스               |
+| 9  | fromNavDllOrRclActParam()     | FS_N_06 | L2   | 65   | case Terminate                                                | Terminate 케이스               |
+| 10 | fromNavDllOrRclActParam()     | FS_N_07 | L2   | 71   | case Disarm                                                   | Disarm 케이스                  |
+| 11 | fromNavDllOrRclActParam()     | FS_N_08 | L2   | 76   | default                                                       | 기본 케이스                    |
+| 12 | fromGfActParam()              | FS_G_01 | L1   | 88   | switch(geofence_violation_action)                             | 지오펜스 위반 액션 분기        |
+| 13 | fromGfActParam()              | FS_G_02 | L2   | 89   | case None                                                     | 액션 없음 케이스               |
+| 14 | fromGfActParam()              | FS_G_03 | L2   | 93   | case Warning                                                  | 경고만 케이스                  |
+| 15 | fromGfActParam()              | FS_G_04 | L2   | 97   | case Hold_mode                                                | Hold 모드 케이스               |
+| 16 | fromGfActParam()              | FS_G_05 | L2   | 103  | case Return_mode                                              | Return 모드 케이스             |
+| 17 | fromGfActParam()              | FS_G_06 | L2   | 108  | case Terminate                                                | Terminate 케이스               |
+| 18 | fromGfActParam()              | FS_G_07 | L2   | 114  | case Land_mode                                                | Land 모드 케이스               |
+| 19 | fromGfActParam()              | FS_G_08 | L2   | 118  | default                                                       | 기본 케이스                    |
+| 20 | fromImbalancedPropActParam()  | FS_I_01 | L1   | 130  | switch(imbalanced_propeller_failsafe_mode)                    | 불균형 프로펠러 모드 분기      |
+| 21 | fromImbalancedPropActParam()  | FS_I_02 | L2   | 131  | case Disabled/default                                         | 비활성화/기본 케이스           |
+| 22 | fromImbalancedPropActParam()  | FS_I_03 | L2   | 136  | case Warning                                                  | 경고 케이스                    |
+| 23 | fromImbalancedPropActParam()  | FS_I_04 | L2   | 140  | case Return                                                   | Return 케이스                  |
+| 24 | fromImbalancedPropActParam()  | FS_I_05 | L2   | 145  | case Land                                                     | Land 케이스                    |
+| 25 | fromActuatorFailureActParam() | FS_A_01 | L1   | 158  | switch(actuator_failure_failsafe_mode)                        | 액추에이터 고장 모드 분기      |
+| 26 | fromActuatorFailureActParam() | FS_A_02 | L2   | 159  | case Warning_only/default                                     | 경고만/기본 케이스             |
+| 27 | fromActuatorFailureActParam() | FS_A_03 | L2   | 164  | case Hold_mode                                                | Hold 모드 케이스               |
+| 28 | fromActuatorFailureActParam() | FS_A_04 | L2   | 168  | case Land_mode                                                | Land 모드 케이스               |
+| 29 | fromActuatorFailureActParam() | FS_A_05 | L2   | 173  | case Return_mode                                              | Return 모드 케이스             |
+| 30 | fromActuatorFailureActParam() | FS_A_06 | L2   | 178  | case Terminate                                                | Terminate 케이스               |
+| 31 | fromBatteryWarningActParam()  | FS_B_01 | L1   | 191  | switch(battery_warning)                                       | 배터리 경고 레벨 분기          |
+| 32 | fromBatteryWarningActParam()  | FS_B_02 | L2   | 192  | default/case BATTERY_WARNING_NONE                             | 기본/경고없음 케이스           |
+| 33 | fromBatteryWarningActParam()  | FS_B_03 | L2   | 197  | case BATTERY_WARNING_LOW                                      | 배터리 LOW 경고 케이스         |
+| 34 | fromBatteryWarningActParam()  | FS_B_04 | L2   | 201  | case BATTERY_WARNING_CRITICAL                                 | 배터리 CRITICAL 경고 케이스    |
+| 35 | fromBatteryWarningActParam()  | FS_B_05 | L2   | 208  | case BATTERY_WARNING_EMERGENCY                                | 배터리 EMERGENCY 경고 케이스   |
+| 36 | fromBatteryWarningActParam()  | FS_B_06 | L3   | 215  | if(param_value == ReturnOrLand)                               | ReturnOrLand 파라미터 확인     |
+| 37 | fromBatteryWarningActParam()  | FS_B_07 | L4   | 216  | if(battery_warning == CRITICAL)                               | CRITICAL 레벨에서 Return 판단  |
+| 38 | checkStateAndMode()           | FS_C_01 | L1   | 412  | if(!manual_control_signal_lost)                               | 수동 제어 신호 정상            |
+| 39 | checkStateAndMode()           | FS_C_02 | L1   | 417  | if(rc_loss_ignored_mission)                                   | 미션모드 RC 손실 무시 조건     |
+| 40 | checkStateAndMode()           | FS_C_03 | L1   | 419  | if(rc_loss_ignored_loiter)                                    | 로이터모드 RC 손실 무시 조건   |
+| 41 | checkStateAndMode()           | FS_C_04 | L1   | 421  | if(rc_loss_ignored_offboard)                                  | 오프보드모드 RC 손실 무시 조건 |
+| 42 | checkStateAndMode()           | FS_C_05 | L1   | 423  | if(rc_loss_ignored_takeoff)                                   | 이륙모드 RC 손실 무시 조건     |
+| 43 | checkStateAndMode()           | FS_C_06 | L1   | 429  | if(rc_in_mode != StickInputDisabled && !rc_loss_ignored)      | RC 입력 활성화 및 무시 안됨    |
+| 44 | checkStateAndMode()           | FS_C_07 | L1   | 435  | if(gcs_connection_loss_ignored)                               | GCS 연결손실 무시 조건         |
+| 45 | checkStateAndMode()           | FS_C_08 | L1   | 438  | if(nav_dll_act != Disabled && !gcs_connection_loss_ignored)   | GCS 연결손실 처리 활성화       |
+| 46 | checkStateAndMode()           | FS_C_09 | L1   | 444  | if(user_intended_mode in AUTO modes)                          | VTOL 쿼드츄트 대상 모드 확인   |
+| 47 | checkStateAndMode()           | FS_C_10 | L1   | 452  | if(user_intended_mode == AUTO_MISSION)                        | 미션 모드 확인                 |
+| 48 | checkStateAndMode()           | FS_C_11 | L2   | 457  | if(rc_disabled && gcs_disabled && mission_finished)           | 양방향 제어 손실 및 미션 완료  |
+| 49 | checkStateAndMode()           | FS_C_12 | L1   | 470  | if(user_intended_mode in AUTO modes)                          | 위치 정확도 검사 대상 모드     |
+| 50 | checkStateAndMode()           | FS_C_13 | L1   | 482  | if(armed_time != 0 && time < armed_time + spoolup_time)       | 스풀업 시간 내 배터리 체크     |
+| 51 | checkStateAndMode()           | FS_C_14 | L1   | 492  | switch(battery_warning)                                       | 배터리 경고 레벨 분기          |
+| 52 | checkStateAndMode()           | FS_C_15 | L2   | 493  | case BATTERY_WARNING_LOW                                      | 배터리 LOW 경고 처리           |
+| 53 | checkStateAndMode()           | FS_C_16 | L2   | 498  | case BATTERY_WARNING_CRITICAL                                 | 배터리 CRITICAL 경고 처리      |
+| 54 | checkStateAndMode()           | FS_C_17 | L2   | 504  | case BATTERY_WARNING_EMERGENCY                                | 배터리 EMERGENCY 경고 처리     |
+| 55 | checkStateAndMode()           | FS_C_18 | L2   | 510  | default                                                       | 배터리 경고 기본 처리          |
+| 56 | checkStateAndMode()           | FS_C_19 | L1   | 516  | if(armed_time != 0 && time < armed_time + spoolup_time)       | ESC 아밍 실패 체크 시간대      |
+| 57 | checkStateAndMode()           | FS_C_20 | L1   | 522  | if(armed_time != 0 && time < armed_time + lockdown_time)      | 중요 고장 lockdown 시간대      |
+| 58 | checkStateAndMode()           | FS_C_21 | L1   | 529  | if(!circuit_breaker_enabled)                                  | 회로차단기 비활성화 확인       |
+| 59 | checkModeFallback()           | FS_M_01 | L1   | 549  | switch(param_com_posctl_navl)                                 | 위치제어 네비게이션 손실 응답  |
+| 60 | checkModeFallback()           | FS_M_02 | L2   | 551  | case Altitude_Manual                                          | 고도/수동 모드 폴백 케이스     |
+| 61 | checkModeFallback()           | FS_M_03 | L3   | 582  | if(POSCTL && !modeCanRun)                                     | POSCTL 모드 실행 불가 확인     |
+| 62 | checkModeFallback()           | FS_M_04 | L3   | 589  | if(ALTCTL && !modeCanRun)                                     | ALTCTL 모드 실행 불가 확인     |
+| 63 | checkModeFallback()           | FS_M_05 | L2   | 597  | case Land_Descend                                             | 착륙/하강 모드 폴백 케이스     |
+| 64 | checkModeFallback()           | FS_M_06 | L3   | 600  | if(POSCTL && !modeCanRun)                                     | POSCTL 모드 실행 불가 확인     |
+| 65 | checkModeFallback()           | FS_M_07 | L4   | 606  | if(!modeCanRun(AUTO_LAND))                                    | AUTO_LAND 모드 실행 불가 확인  |
+| 66 | checkModeFallback()           | FS_M_08 | L1   | 617  | if(!modeCanRun(user_intended_mode))                           | 최종 모드 실행 가능성 확인     |
+| 67 | modifyUserIntendedMode()      | FS_U_01 | L1   | 629  | if(previous_action > Warn)                                    | 이전 액션이 failsafe 액션인지  |
+| 68 | modifyUserIntendedMode()      | FS_U_02 | L2   | 630  | if(current_mode == ORBIT)                                     | 현재 모드가 ORBIT인지 확인     |
+| 69 | updateArmingState()           | FS_S_01 | L1   | 825  | if(armed)                                                     | 현재 아밍 상태 확인            |
+| 70 | updateArmingState()           | FS_S_02 | L2   | 826  | if(!_was_armed)                                               | 이전 비아밍 상태 확인          |
+| 71 | updateArmingState()           | FS_S_03 | L3   | 827  | if(manual_control_signal_lost)                                | 아밍 시 수동제어 손실 확인     |
+| 72 | updateArmingState()           | FS_S_04 | L1   | 832  | if(!armed && _was_armed)                                      | 무장해제 상태 확인             |
+
+:::
+
+### 2.2 Failsafe 상태 조회 함수들 (HPP 인라인)
+
+:::details 1. selectedAction()
+
+- **위치**: framework.h:152
+- **분기 레벨**: 0단계 (단순 반환)
+- **분기 조건**: 없음 (inline 함수, 단순 멤버변수 반환)
+- **커버리지 요구사항**: Commander Module에서 호출
+  :::
+
+:::details 2. inFailsafe()
+
+- **위치**: framework.h:150
+- **분기 레벨**: 0단계 (단순 반환)
+- **분기 조건**: 없음 (inline 함수, 단순 비교 반환)
+- **커버리지 요구사항**: Commander Module에서 호출
+  :::
+
+:::details 3. userTakeoverActive()
+
+- **위치**: framework.h:156
+- **분기 레벨**: 0단계
+- **분기 조건**: 없음(_user_takeover_active 반환)
+- **커버리지 요구사항**: Commander Module에서 호출
+  :::
+
+### 2.3 Failsafe 함수
+
+:::details 1. fromNavDllOrRclActParam()
+
+- **위치**: failsafe.cpp:43-82
+- **분기 레벨**: 2단계 (switch-case문)
+- **커버리지 요구사항**: 8개 분기 만족
+
 **분기 구조 분석:**
+
 ```
 L1: switch (gcs_connection_loss_failsafe_mode(param_value))
     case Disabled:
-    case Hold_mode:  
+    case Hold_mode:
     case Return_mode:
     case Land_mode:
     case Terminate:
@@ -25,18 +212,26 @@ L1: switch (gcs_connection_loss_failsafe_mode(param_value))
     default:
 ```
 
-| ID | Level | 분기 조건 | 설명 | 커버리지 요구사항 |
-|:--:|:-----:|---------|-----|:----------------:|
-| FS-01 | L1 | gcs_connection_loss_failsafe_mode::Disabled | GCS 연결 손실 비활성화 | True(case) 필요 |
-| FS-02 | L1 | gcs_connection_loss_failsafe_mode::Hold_mode | Hold 모드 설정 | True(case) 필요 |
-| FS-03 | L1 | gcs_connection_loss_failsafe_mode::Return_mode | Return 모드 설정 | True(case) 필요 |
-| FS-04 | L1 | gcs_connection_loss_failsafe_mode::Land_mode | Land 모드 설정 | True(case) 필요 |
-| FS-05 | L1 | gcs_connection_loss_failsafe_mode::Terminate | Terminate 액션 설정 | True(case) 필요 |
-| FS-06 | L1 | gcs_connection_loss_failsafe_mode::Disarm | Disarm 액션 설정 | True(case) 필요 |
-| FS-07 | L1 | default | 기본값 처리 | True(case) 필요 |
+|   ID   | Level | 분기 조건                                      | 설명                   | 커버리지 요구사항 |
+| :-----: | :---: | ---------------------------------------------- | ---------------------- | :---------------: |
+| FS_N_02 |  L2  | gcs_connection_loss_failsafe_mode::Disabled    | GCS 연결 손실 비활성화 |  True(case) 필요  |
+| FS_N_03 |  L2  | gcs_connection_loss_failsafe_mode::Hold_mode   | Hold 모드 설정         |  True(case) 필요  |
+| FS_N_04 |  L2  | gcs_connection_loss_failsafe_mode::Return_mode | Return 모드 설정       |  True(case) 필요  |
+| FS_N_05 |  L2  | gcs_connection_loss_failsafe_mode::Land_mode   | Land 모드 설정         |  True(case) 필요  |
+| FS_N_06 |  L2  | gcs_connection_loss_failsafe_mode::Terminate   | Terminate 액션 설정    |  True(case) 필요  |
+| FS_N_07 |  L2  | gcs_connection_loss_failsafe_mode::Disarm      | Disarm 액션 설정       |  True(case) 필요  |
+| FS_N_08 |  L2  | default                                        | 기본값 처리            |  True(case) 필요  |
 
-##### A.2 fromGfActParam() - 지오펜스 위반 처리
+:::
+
+:::details 2. fromGfActParam()
+
+- **위치**: failsafe.cpp:84-124
+- **분기 레벨**: 2단계 (switch-case문)
+- **커버리지 요구사항**: 8개 분기 만족
+
 **분기 구조 분석:**
+
 ```
 L1: switch (geofence_violation_action(param_value))
     case None:
@@ -48,57 +243,94 @@ L1: switch (geofence_violation_action(param_value))
     default:
 ```
 
-| ID | Level | 분기 조건 | 설명 | 커버리지 요구사항 |
-|:--:|:-----:|---------|-----|:----------------:|
-| FS-08 | L1 | geofence_violation_action::None | 지오펜스 액션 없음 | True(case) 필요 |
-| FS-09 | L1 | geofence_violation_action::Warning | 경고만 표시 | True(case) 필요 |
-| FS-10 | L1 | geofence_violation_action::Hold_mode | Hold 모드 + 유저 탈출 허용 | True(case) 필요 |
-| FS-11 | L1 | geofence_violation_action::Return_mode | Return 모드 설정 | True(case) 필요 |
-| FS-12 | L1 | geofence_violation_action::Terminate | Terminate 액션 | True(case) 필요 |
-| FS-13 | L1 | geofence_violation_action::Land_mode | Land 모드 설정 | True(case) 필요 |
-| FS-14 | L1 | default | 기본값 Warning 처리 | True(case) 필요 |
+:::
 
-##### A.3 fromBatteryWarningActParam() - 배터리 경고 처리 (중첩 구조)
+:::details 3. fromImbalancedPropActParam()
+
+- **위치**: failsafe.cpp:126-152
+- **분기 레벨**: 2단계 (switch-case문)
+- **커버리지 요구사항**: 5개 분기 만족
+
 **분기 구조 분석:**
+
+```
+L1: switch (imbalanced_propeller_failsafe_mode(param_value))
+    case Disabled/default:
+    case Warning:
+    case Return:
+    case Land:
+```
+
+:::
+
+:::details 4. fromActuatorFailureActParam()
+
+- **위치**: failsafe.cpp:154-185
+- **분기 레벨**: 2단계 (switch-case문)
+- **커버리지 요구사항**: 6개 분기 만족
+
+**분기 구조 분석:**
+
+```
+L1: switch (actuator_failure_failsafe_mode(param_value))
+    case Warning_only/default:
+    case Hold_mode:
+    case Land_mode:
+    case Return_mode:
+    case Terminate:
+```
+
+:::
+
+:::details 5. fromBatteryWarningActParam()
+
+- **위치**: failsafe.cpp:187-246
+- **분기 레벨**: 4단계 (중첩 switch문)
+- **커버리지 요구사항**: 7개 분기 만족
+
+**분기 구조 분석:**
+
 ```
 L1: switch (battery_warning)
-    case BATTERY_WARNING_NONE:
+    case BATTERY_WARNING_NONE/default:
     case BATTERY_WARNING_LOW:
     case BATTERY_WARNING_CRITICAL:
-        L2: switch ((LowBatteryAction)param_value)
-            case Return:
-            case ReturnOrLand:
-            case Land:
-            case Warning:
+        L3: switch (LowBatteryAction(param_value))
     case BATTERY_WARNING_EMERGENCY:
-        L2: switch ((LowBatteryAction)param_value)
-            case Return:
-            case ReturnOrLand:
-            case Land:
-            case Warning:
-    default:
+        L3: switch (LowBatteryAction(param_value))
 ```
 
-| ID | Level | 분기 조건 | 설명 | 커버리지 요구사항 |
-|:--:|:-----:|---------|-----|:----------------:|
-| FS-15 | L1 | BATTERY_WARNING_NONE | 배터리 정상 상태 | True(case) 필요 |
-| FS-16 | L1 | BATTERY_WARNING_LOW | 배터리 낮음 경고 | True(case) 필요 |
-| FS-17 | L1 | BATTERY_WARNING_CRITICAL | 배터리 위험 상태 | True(case) 필요 |
-| FS-18 | L2 | LowBatteryAction::Return (CRITICAL) | 위험 상태에서 Return 액션 | True(case, L1=CRITICAL) |
-| FS-19 | L2 | LowBatteryAction::ReturnOrLand (CRITICAL) | 위험 상태에서 RTL 액션 | True(case, L1=CRITICAL) |
-| FS-20 | L2 | LowBatteryAction::Land (CRITICAL) | 위험 상태에서 Land 액션 | True(case, L1=CRITICAL) |
-| FS-21 | L2 | LowBatteryAction::Warning (CRITICAL) | 위험 상태에서 경고만 | True(case, L1=CRITICAL) |
-| FS-22 | L1 | BATTERY_WARNING_EMERGENCY | 배터리 응급 상태 | True(case) 필요 |
-| FS-23 | L2 | LowBatteryAction::Return (EMERGENCY) | 응급 상태에서 Return 액션 | True(case, L1=EMERGENCY) |
-| FS-24 | L2 | LowBatteryAction::ReturnOrLand (EMERGENCY) | 응급 상태에서 Land 액션 | True(case, L1=EMERGENCY) |
-| FS-25 | L2 | LowBatteryAction::Land (EMERGENCY) | 응급 상태에서 Land 액션 | True(case, L1=EMERGENCY) |
-| FS-26 | L2 | LowBatteryAction::Warning (EMERGENCY) | 응급 상태에서 경고만 | True(case, L1=EMERGENCY) |
+:::
 
-##### A.4 fromOffboardLossActParam() - Offboard 연결 손실 처리
+:::details 6. fromQuadchuteActParam()
+
+- **위치**: failsafe.cpp:248-275
+- **분기 레벨**: 2단계 (switch-case문)
+- **커버리지 요구사항**: 5개 분기 만족
+
 **분기 구조 분석:**
+
+```
+L1: switch (command_after_quadchute(param_value))
+    case Warning_only/default:
+    case Return_mode:
+    case Land_mode:
+    case Hold_mode:
+```
+
+:::
+
+:::details 7. fromOffboardLossActParam()
+
+- **위치**: failsafe.cpp:277-324
+- **분기 레벨**: 2단계 (switch-case문)
+- **커버리지 요구사항**: 8개 분기 만족
+
+**분기 구조 분석:**
+
 ```
 L1: switch (offboard_loss_failsafe_mode(param_value))
-    case Position_mode:
+    case Position_mode/default:
     case Altitude_mode:
     case Manual:
     case Return_mode:
@@ -106,646 +338,894 @@ L1: switch (offboard_loss_failsafe_mode(param_value))
     case Hold_mode:
     case Terminate:
     case Disarm:
-    default:
 ```
 
-| ID | Level | 분기 조건 | 설명 | 커버리지 요구사항 |
-|:--:|:-----:|---------|-----|:----------------:|
-| FS-27 | L1 | offboard_loss_failsafe_mode::Position_mode | Position 제어 모드로 복귀 | True(case) 필요 |
-| FS-28 | L1 | offboard_loss_failsafe_mode::Altitude_mode | Altitude 제어 모드로 복귀 | True(case) 필요 |
-| FS-29 | L1 | offboard_loss_failsafe_mode::Manual | Manual 모드로 복귀 | True(case) 필요 |
-| FS-30 | L1 | offboard_loss_failsafe_mode::Return_mode | Return 모드 설정 | True(case) 필요 |
-| FS-31 | L1 | offboard_loss_failsafe_mode::Land_mode | Land 모드 설정 | True(case) 필요 |
-| FS-32 | L1 | offboard_loss_failsafe_mode::Hold_mode | Hold 모드 설정 | True(case) 필요 |
-| FS-33 | L1 | offboard_loss_failsafe_mode::Terminate | Terminate 액션 | True(case) 필요 |
-| FS-34 | L1 | offboard_loss_failsafe_mode::Disarm | Disarm 액션 | True(case) 필요 |
+:::
 
-#### B. checkStateAndMode() - 메인 실패안전 로직 (복합 중첩 구조 L1-L4)
-이 함수는 Failsafe 모듈의 핵심으로 가장 복잡한 분기 구조를 가집니다.
+:::details 8. fromHighWindLimitActParam()
+
+- **위치**: failsafe.cpp:326-366
+- **분기 레벨**: 2단계 (switch-case문)
+- **커버리지 요구사항**: 7개 분기 만족
 
 **분기 구조 분석:**
+
 ```
-L1: Manual Control Loss 검사
-    if (!status_flags.manual_control_signal_lost)
-    if (_param_com_rc_in_mode.get() != int32_t(RcInMode::StickInputDisabled) && !rc_loss_ignored)
-        L2: CHECK_FAILSAFE(status_flags, manual_control_signal_lost, ...)
+L1: switch (command_after_high_wind_failsafe(param_value))
+    case None/default:
+    case Warning:
+    case Hold_mode:
+    case Return_mode:
+    case Terminate:
+    case Land_mode:
+```
 
-L1: GCS Connection Loss 검사  
-    if (_param_nav_dll_act.get() != int32_t(gcs_connection_loss_failsafe_mode::Disabled) && !gcs_connection_loss_ignored)
-        L2: CHECK_FAILSAFE(status_flags, gcs_connection_lost, ...)
+:::
 
-L1: VTOL Transition Failure 검사
-    if (state.user_intended_mode == AUTO_MISSION || AUTO_LOITER || AUTO_TAKEOFF || AUTO_VTOL_TAKEOFF)
-        L2: CHECK_FAILSAFE(status_flags, vtol_fixed_wing_system_failure, ...)
+:::details 9. fromRemainingFlightTimeLowActParam()
 
-L1: Mission 상태 검사
-    if (state.user_intended_mode == NAVIGATION_STATE_AUTO_MISSION)
-        L2: CHECK_FAILSAFE(status_flags, mission_failure, ...)
-        L2: if (rc_disabled && gcs_disabled && mission_finished)
-            L3: checkFailsafe(...mission_control_lost...)
+- **위치**: failsafe.cpp:368-396
+- **분기 레벨**: 2단계 (switch-case문)
+- **커버리지 요구사항**: 4개 분기 만족
 
-L1: Battery 경고 처리
-    L2: switch (status_flags.battery_warning)
+**분기 구조 분석:**
+
+```
+L1: switch (command_after_remaining_flight_time_low(param_value))
+    case None/default:
+    case Warning:
+    case Return_mode:
+```
+
+:::
+
+:::details 10. checkStateAndMode()
+
+- **위치**: failsafe.cpp:398-546
+- **분기 레벨**: 4단계 (중첩 if문 + switch문)
+- **커버리지 요구사항**: 35개 분기 만족
+
+**주요 분기 구조 분석:**
+
+```
+L1: RC 손실 검사
+    if(!manual_control_signal_lost) - 신호 정상시 처리
+    if(rc_in_mode != StickInputDisabled && !rc_loss_ignored) - RC 입력 체크
+  
+L1: GCS 연결 손실 검사  
+    if(nav_dll_act != Disabled && !gcs_connection_loss_ignored) - GCS 연결 체크
+  
+L1: 배터리 경고 처리
+    switch(battery_warning)
         case BATTERY_WARNING_LOW:
-        case BATTERY_WARNING_CRITICAL: 
+        case BATTERY_WARNING_CRITICAL:
         case BATTERY_WARNING_EMERGENCY:
         default:
-
-L1: Failure Detector 처리
-    L2: if (armed_time != 0 && time_us < armed_time + spoolup_time)
-        L3: CHECK_FAILSAFE(...esc_arming_failure...)
-    L2: if (armed_time != 0 && time_us < armed_time + (lockdown + spoolup) time)
-        L3: CHECK_FAILSAFE(...critical_failure -> Disarm...)  
-    L2: else if (!circuit_breaker_enabled...)
-        L3: CHECK_FAILSAFE(...critical_failure -> Terminate...)
-    L2: else
-        L3: CHECK_FAILSAFE(...critical_failure -> Warn...)
+      
+L1: 시간 기반 조건부 처리
+    if(armed_time != 0 && time < armed_time + spoolup_time) - 스풀업 시간 체크
+    if(armed_time != 0 && time < armed_time + lockdown_time) - lockdown 시간 체크
 ```
 
-| ID | Level | 분기 조건 | 설명 | 커버리지 요구사항 |
-|:--:|:-----:|---------|-----|:----------------:|
-| FS-35 | L1 | !status_flags.manual_control_signal_lost | 수동 제어 신호 복구 감지 | True/False 모두 필요 |
-| FS-36 | L1 | _param_com_rc_in_mode.get() != RcInMode::StickInputDisabled && !rc_loss_ignored | RC 손실 페일세이프 활성화 조건 | True/False 모두 필요 |
-| FS-37 | L1 | _param_nav_dll_act.get() != gcs_connection_loss_failsafe_mode::Disabled && !gcs_connection_loss_ignored | GCS 연결 손실 페일세이프 활성화 | True/False 모두 필요 |
-| FS-38 | L1 | state.user_intended_mode == AUTO_MISSION or AUTO_LOITER or AUTO_TAKEOFF or AUTO_VTOL_TAKEOFF | VTOL 전환 실패 모니터링 모드 | True/False 모두 필요 |
-| FS-39 | L1 | state.user_intended_mode == NAVIGATION_STATE_AUTO_MISSION | 미션 모드 페일세이프 | True/False 모두 필요 |
-| FS-40 | L2 | rc_disabled && gcs_disabled && mission_finished | 미션 완료 후 통신 손실 | True/False (L1=True 조건 하에) |
-| FS-41 | L2 | status_flags.battery_warning == BATTERY_WARNING_LOW | 배터리 낮음 경고 | True(case, L1 진입) |
-| FS-42 | L2 | status_flags.battery_warning == BATTERY_WARNING_CRITICAL | 배터리 위험 경고 | True(case, L1 진입) |
-| FS-43 | L2 | status_flags.battery_warning == BATTERY_WARNING_EMERGENCY | 배터리 응급 경고 | True(case, L1 진입) |
-| FS-44 | L2 | (_armed_time != 0) && (time_us < _armed_time + spoolup_time) | 무장 직후 스풀업 시간 내 | True/False (무장 상태 확인) |
-| FS-45 | L2 | (_armed_time != 0) && (time_us < _armed_time + lockdown + spoolup_time) | 무장 직후 록다운 시간 내 | True/False (스풀업 이후) |
-| FS-46 | L2 | !circuit_breaker_enabled_by_val(_param_cbrk_flightterm.get(), CBRK_FLIGHTTERM_KEY) | 비행 종료 회로차단기 비활성화 | True/False (록다운 이후) |
+|   ID   | Level | 분기 조건                                               | 설명                        |   커버리지 요구사항   |
+| :-----: | :---: | ------------------------------------------------------- | --------------------------- | :-------------------: |
+| FS_C_01 |  L1  | !manual_control_signal_lost                             | 수동 제어 신호 정상         | True/False 둘 다 필요 |
+| FS_C_06 |  L1  | rc_in_mode != StickInputDisabled && !rc_loss_ignored    | RC 입력 활성화 및 무시 안됨 | True/False 둘 다 필요 |
+| FS_C_08 |  L1  | nav_dll_act != Disabled && !gcs_connection_loss_ignored | GCS 연결손실 처리 활성화    | True/False 둘 다 필요 |
+| FS_C_14 |  L1  | switch(battery_warning)                                 | 배터리 경고 레벨 분기       |    모든 case 필요    |
+| FS_C_20 |  L1  | armed_time != 0 && time < armed_time + lockdown_time    | 중요 고장 lockdown 시간대   | True/False 둘 다 필요 |
 
-#### C. updateArmingState() - 무장 상태 관리 (L1-L2)
+:::
+
+:::details 11. checkModeFallback()
+
+- **위치**: failsafe.cpp:548-623
+- **분기 레벨**: 4단계 (switch + 중첩 if문)
+- **커버리지 요구사항**: 8개 분기 만족
+
 **분기 구조 분석:**
-```
-L1: if (!_was_armed && armed)        // 무장 전환
-L1: else if (!armed)                 // 해제 전환
-```
 
-| ID | Level | 분기 조건 | 설명 | 커버리지 요구사항 |
-|:--:|:-----:|---------|-----|:----------------:|
-| FS-47 | L1 | !_was_armed && armed | 해제→무장 전환 감지 | True/False 모두 필요 |
-| FS-48 | L1 | !armed | 해제 상태 감지 | True/False 모두 필요 |
-
-#### D. checkModeFallback() - 모드 폴백 처리 (L1-L4 중첩)
-**분기 구조 분석:**
 ```
-L1: if (status_flags.offboard_control_signal_lost && (status_flags.mode_req_offboard_signal & mode_mask))
-    L2: action = fromOffboardLossActParam(...)
-    L2: if (action == Action::Disarm)
-        return action
-
-L1: switch (position_control_navigation_loss_response(_param_com_posctl_navl.get()))
+L1: switch(_param_com_posctl_navl.get())
     case Altitude_Manual:
-        L2: if (user_mode == POSCTL && !modeCanRun(...POSCTL))
-            L3: action = Action::FallbackAltCtrl
-        L2: if (user_mode == ALTCTL && !modeCanRun(...ALTCTL))  
-            L3: action = Action::FallbackStab
+        L3: if(POSCTL && !modeCanRun) - POSCTL 폴백 체크
+        L3: if(ALTCTL && !modeCanRun) - ALTCTL 폴백 체크
     case Land_Descend:
-        L2: if (user_mode == POSCTL && !modeCanRun(...POSCTL))
-            L3: action = Action::Land
-            L3: if (!modeCanRun(...AUTO_LAND))
-                L4: action = Action::Descend
+        L3: if(POSCTL && !modeCanRun) - POSCTL 폴백 체크
+        L4: if(!modeCanRun(AUTO_LAND)) - AUTO_LAND 폴백 체크
 
-L1: if (!modeCanRun(status_flags, user_intended_mode))
-    action = Action::RTL
+L1: if(!modeCanRun(user_intended_mode)) - 최종 모드 체크
 ```
 
-| ID | Level | 분기 조건 | 설명 | 커버리지 요구사항 |
-|:--:|:-----:|---------|-----|:----------------:|
-| FS-49 | L1 | status_flags.offboard_control_signal_lost && (mode_req_offboard_signal & mode_mask) | Offboard 신호 손실과 모드 요구사항 | True/False 모두 필요 |
-| FS-50 | L2 | action == Action::Disarm | Disarm 액션으로 즉시 반환 | True/False (L1=True 조건 하에) |
-| FS-51 | L1 | position_control_navigation_loss_response::Altitude_Manual | 고도/수동 폴백 정책 | True(case) 필요 |
-| FS-52 | L2 | user_intended_mode == NAVIGATION_STATE_POSCTL && !modeCanRun(POSCTL) | PosCtrl 모드 불가능 | True/False (L1=Altitude_Manual) |
-| FS-53 | L2 | user_intended_mode == NAVIGATION_STATE_ALTCTL && !modeCanRun(ALTCTL) | AltCtrl 모드 불가능 | True/False (L1=Altitude_Manual) |
-| FS-54 | L1 | position_control_navigation_loss_response::Land_Descend | 착륙/하강 폴백 정책 | True(case) 필요 |
-| FS-55 | L2 | user_intended_mode == NAVIGATION_STATE_POSCTL && !modeCanRun(POSCTL) | PosCtrl 모드 불가능 (착륙 정책) | True/False (L1=Land_Descend) |
-| FS-56 | L3 | !modeCanRun(status_flags, NAVIGATION_STATE_AUTO_LAND) | 자동 착륙 모드 불가능 | True/False (L2=True 조건 하에) |
-| FS-57 | L1 | !modeCanRun(status_flags, user_intended_mode) | 의도된 모드 실행 불가능 | True/False 모두 필요 |
+:::
 
-#### E. modifyUserIntendedMode() - 사용자 모드 수정 (L1-L2)
-**분기 구조 분석:**
-```
-L1: if ((int)previous_action > (int)Action::Warn && current_mode == ORBIT)
-    L2: return NAVIGATION_STATE_AUTO_LOITER
-```
+:::details 12. updateArmingState()
 
-| ID | Level | 분기 조건 | 설명 | 커버리지 요구사항 |
-|:--:|:-----:|---------|-----|:----------------:|
-| FS-58 | L1 | (int)previous_action > (int)Action::Warn | 이전 액션이 경고보다 심각 | True/False 모두 필요 |
-| FS-59 | L2 | modeFromAction(current_action, user_intended_mode) == NAVIGATION_STATE_ORBIT | Orbit 모드 감지 | True/False (L1=True 조건 하에) |
-
-### 1.2 FailsafeBase (Framework) 클래스 분기문
-
-#### A. update() - 메인 업데이트 함수 (L1-L3 중첩)
-**분기 구조 분석:**
-```
-L1: if (_last_update == 0)
-L1: if ((_last_armed && !state.armed) || (!_last_armed && state.armed))
-L1: if (user_intended_mode_updated || _user_takeover_active)
-L1: if (_defer_failsafes && _failsafe_defer_started != 0 && _defer_timeout > 0 && timeout_check)
-L1: if (_failsafe_defer_started == 0)
-L1: if (action_state.action > _selected_action || (action_state.action != Action::None && _notification_required))
-```
-
-| ID | Level | 분기 조건 | 설명 | 커버리지 요구사항 |
-|:--:|:-----:|---------|-----|:----------------:|
-| FB-01 | L1 | _last_update == 0 | 첫 번째 업데이트 감지 | True/False 모두 필요 |
-| FB-02 | L1 | (_last_armed && !state.armed) or (!_last_armed && state.armed) | 무장 상태 변화 감지 | True/False 모두 필요 |
-| FB-03 | L1 | user_intended_mode_updated or _user_takeover_active | 모드 변경 또는 사용자 인계 | True/False 모두 필요 |
-| FB-04 | L1 | _defer_failsafes && _failsafe_defer_started != 0 && _defer_timeout > 0 && time_us > timeout | 페일세이프 지연 타임아웃 | True/False 모두 필요 |
-| FB-05 | L1 | _failsafe_defer_started == 0 | 지연 시작되지 않음 | True/False 모두 필요 |
-| FB-06 | L1 | action_state.action > _selected_action or (action_state.action != Action::None && _notification_required) | 사용자 알림 필요 조건 | True/False 모두 필요 |
-
-#### B. updateStartDelay() - 시작 지연 관리 (L1-L2)
-**분기 구조 분석:**
-```
-L1: if (delay_active)
-    L2: if (dt < _current_start_delay)
-    L2: else
-L1: else
-    L2: if (_current_start_delay > configured_delay)
-```
-
-| ID | Level | 분기 조건 | 설명 | 커버리지 요구사항 |
-|:--:|:-----:|---------|-----|:----------------:|
-| FB-07 | L1 | delay_active | 지연 활성화 상태 | True/False 모두 필요 |
-| FB-08 | L2 | dt < _current_start_delay | 델타 시간이 현재 지연보다 작음 | True/False (L1=True 조건 하에) |
-| FB-09 | L2 | _current_start_delay > configured_delay | 현재 지연이 설정값 초과 | True/False (L1=False 조건 하에) |
-
-#### C. checkFailsafe() - 페일세이프 확인 로직 (L1-L3 중첩)
-**분기 구조 분석:**
-```
-L1: if (cur_state_failure)
-    L2: for (int i = 0; i < max_num_actions; ++i)
-        L3: if (!_actions[i].valid())
-        L3: else if (_actions[i].id == caller_id)
-    L2: if (found_idx != -1)
-        L3: if (_actions[found_idx].activated && !_duplicate_reported_once)
-        L3: if (!last_state_failure)
-    L2: else
-        L3: if (free_idx == -1)
-            L4: for (int i = 0; i < max_num_actions; ++i)
-        L3: if (free_idx != -1)
-            L4: if (options.allow_user_takeover == UserTakeoverAllowed::Auto)
-                L5: if (_param_com_fail_act_t.get() > 0.1f)
-                L5: else
-L1: else if (last_state_failure && !cur_state_failure)
-```
-
-| ID | Level | 분기 조건 | 설명 | 커버리지 요구사항 |
-|:--:|:-----:|---------|-----|:----------------:|
-| FB-10 | L1 | cur_state_failure | 현재 상태 실패 감지 | True/False 모두 필요 |
-| FB-11 | L3 | !_actions[i].valid() | 유효하지 않은 액션 슬롯 | True/False (L1=True, L2 루프 내) |
-| FB-12 | L3 | _actions[i].id == caller_id | 호출자 ID 매칭 | True/False (L1=True, L2 루프 내) |
-| FB-13 | L2 | found_idx != -1 | 기존 액션 발견 | True/False (L1=True 조건 하에) |
-| FB-14 | L3 | _actions[found_idx].activated && !_duplicate_reported_once | 중복 액션 감지 | True/False (L2=True 조건 하에) |
-| FB-15 | L3 | !last_state_failure | 이전 상태 정상이었음 | True/False (L2=True 조건 하에) |
-| FB-16 | L3 | free_idx == -1 | 빈 슬롯 없음 | True/False (L2=False 조건 하에) |
-| FB-17 | L4 | options.action > _actions[i].action | 액션 우선순위 비교 | True/False (L3=True 조건 하에) |
-| FB-18 | L3 | free_idx != -1 | 빈 슬롯 발견 | True/False (L2=False 조건 하에) |
-| FB-19 | L4 | options.allow_user_takeover == UserTakeoverAllowed::Auto | 자동 사용자 인계 허용 | True/False (L3=True 조건 하에) |
-| FB-20 | L5 | _param_com_fail_act_t.get() > 0.1f | 페일세이프 지연 시간 설정 | True/False (L4=True 조건 하에) |
-| FB-21 | L1 | last_state_failure && !cur_state_failure | 실패→정상 전환 | True/False 모두 필요 |
-
-#### D. getSelectedAction() - 액션 선택 로직 (L1-L5 중첩)
-이 함수는 FailsafeBase에서 가장 복잡한 분기 구조를 가집니다.
+- **위치**: failsafe.cpp:548-560
+- **분기 레벨**: 3단계 (중첩 if문)
+- **커버리지 요구사항**: 4개 분기 만족
 
 **분기 구조 분석:**
+
 ```
-L1: if (_selected_action == Action::Terminate)
-L1: if (!state.armed)
-L1: for (int action_idx = 0; action_idx < max_num_actions; ++action_idx)
-    L2: if (cur_action.valid())
-        L3: if (cur_action.allow_user_takeover > allow_user_takeover)
-        L3: if (cur_action.action > selected_action)
-        L3: if (!cur_action.can_be_deferred)
-L1: if (_defer_failsafes && allow_failsafe_to_be_deferred && selected_action != Action::None)
-L1: if (_current_delay > 0 && conditions...)
-L1: if (actionAllowsUserTakeover(selected_action) && takeover_allowed)
-    L2: if (!_user_takeover_active && rc_sticks_takeover_request)
-    L2: if (!_user_takeover_active)
-    L2: if (mode_fallback > selected_action)
-L1: switch (selected_action) // 거대한 fallthrough 구조
-    case Action::FallbackPosCtrl:
-        L2: if (modeCanRun(...POSCTL))
-    case Action::FallbackAltCtrl: 
-        L2: if (modeCanRun(...ALTCTL))
-    case Action::FallbackStab:
-        L2: if (modeCanRun(...STAB))
-    case Action::Hold:
-        L2: if (modeCanRun(...LOITER))
-    case Action::RTL:
-        L2: if (modeCanRun(...RTL))
-    case Action::Land:
-        L2: if (modeCanRun(...LAND))
-    case Action::Descend:
-        L2: if (modeCanRun(...DESCEND))
-    case Action::Terminate:
-    case Action::Disarm:
+L1: if(armed) - 현재 아밍 상태
+    L2: if(!_was_armed) - 이전 비아밍 상태
+        L3: if(manual_control_signal_lost) - 아밍 시 수동제어 손실
+L1: if(!armed && _was_armed) - 무장해제 상태
 ```
 
-| ID | Level | 분기 조건 | 설명 | 커버리지 요구사항 |
-|:--:|:-----:|---------|-----|:----------------:|
-| FB-22 | L1 | _selected_action == Action::Terminate | 종료 액션은 절대 해제되지 않음 | True/False 모두 필요 |
-| FB-23 | L1 | !state.armed | 해제 상태에서 액션 없음 | True/False 모두 필요 |
-| FB-24 | L2 | cur_action.valid() | 유효한 액션 검사 | True/False (액션 루프 내) |
-| FB-25 | L3 | cur_action.allow_user_takeover > allow_user_takeover | 더 제한적인 사용자 인계 설정 | True/False (L2=True 조건 하에) |
-| FB-26 | L3 | cur_action.action > selected_action | 더 심각한 액션 선택 | True/False (L2=True 조건 하에) |
-| FB-27 | L3 | !cur_action.can_be_deferred | 지연할 수 없는 액션 | True/False (L2=True 조건 하에) |
-| FB-28 | L1 | _defer_failsafes && allow_failsafe_to_be_deferred && selected_action != Action::None | 페일세이프 지연 조건 | True/False 모두 필요 |
-| FB-29 | L1 | _current_delay > 0 && !_user_takeover_active && conditions... | 지연된 Hold 진입 조건 | True/False 모두 필요 |
-| FB-30 | L1 | actionAllowsUserTakeover(selected_action) && takeover_allowed | 사용자 인계 허용 조건 | True/False 모두 필요 |
-| FB-31 | L2 | !_user_takeover_active && rc_sticks_takeover_request | RC 스틱으로 인계 요청 | True/False (L1=True 조건 하에) |
-| FB-32 | L2 | !_user_takeover_active | 인계 상태 비활성화 | True/False (L1=True 조건 하에) |
-| FB-33 | L2 | mode_fallback > selected_action | 모드 폴백이 더 심각함 | True/False (L1=True 조건 하에) |
-| FB-34 | L2 | modeCanRun(status_flags, NAVIGATION_STATE_POSCTL) | Position 제어 모드 실행 가능 | True/False (L1=FallbackPosCtrl) |
-| FB-35 | L2 | modeCanRun(status_flags, NAVIGATION_STATE_ALTCTL) | Altitude 제어 모드 실행 가능 | True/False (L1=FallbackAltCtrl) |
-| FB-36 | L2 | modeCanRun(status_flags, NAVIGATION_STATE_STAB) | Stabilized 모드 실행 가능 | True/False (L1=FallbackStab) |
-| FB-37 | L2 | modeCanRun(status_flags, NAVIGATION_STATE_AUTO_LOITER) | Hold 모드 실행 가능 | True/False (L1=Hold) |
-| FB-38 | L2 | modeCanRun(status_flags, NAVIGATION_STATE_AUTO_RTL) | RTL 모드 실행 가능 | True/False (L1=RTL) |
-| FB-39 | L2 | modeCanRun(status_flags, NAVIGATION_STATE_AUTO_LAND) | Land 모드 실행 가능 | True/False (L1=Land) |
-| FB-40 | L2 | modeCanRun(status_flags, NAVIGATION_STATE_DESCEND) | Descend 모드 실행 가능 | True/False (L1=Descend) |
+:::
 
-#### E. modeCanRun() - 모드 실행 가능성 검사 (L1 단일 복합 조건)
+:::details 13. modifyUserIntendedMode()
+
+- **위치**: failsafe.cpp:625-636
+- **분기 레벨**: 2단계 (중첩 if문)
+- **커버리지 요구사항**: 2개 분기 만족
+
 **분기 구조 분석:**
+
 ```
-L1: return (!status_flags.angular_velocity_invalid || ((status_flags.mode_req_angular_velocity & mode_mask) == 0)) &&
-          (!status_flags.attitude_invalid || ((status_flags.mode_req_attitude & mode_mask) == 0)) &&
-          (!status_flags.local_position_invalid || ((status_flags.mode_req_local_position & mode_mask) == 0)) &&
-          (!status_flags.local_position_invalid_relaxed || ((status_flags.mode_req_local_position_relaxed & mode_mask) == 0)) &&
-          (!status_flags.global_position_invalid || ((status_flags.mode_req_global_position & mode_mask) == 0)) &&
-          (!status_flags.local_altitude_invalid || ((status_flags.mode_req_local_alt & mode_mask) == 0)) &&
-          (!status_flags.auto_mission_missing || ((status_flags.mode_req_mission & mode_mask) == 0)) &&
-          (!status_flags.offboard_control_signal_lost || ((status_flags.mode_req_offboard_signal & mode_mask) == 0)) &&
-          (!status_flags.home_position_invalid || ((status_flags.mode_req_home_position & mode_mask) == 0)) &&
-          ((status_flags.mode_req_other & mode_mask) == 0);
+L1: if(previous_action > Action::Warn) - 이전 액션이 failsafe 액션인지
+    L2: if(current_mode == ORBIT) - 현재 모드가 ORBIT인지 확인
 ```
 
-| ID | Level | 분기 조건 | 설명 | 커버리지 요구사항 |
-|:--:|:-----:|---------|-----|:----------------:|
-| FB-41 | L1 | !status_flags.angular_velocity_invalid or ((mode_req_angular_velocity & mode_mask) == 0) | 각속도 요구사항 검사 | 복합 조건 True/False |
-| FB-42 | L1 | !status_flags.attitude_invalid or ((mode_req_attitude & mode_mask) == 0) | 자세 요구사항 검사 | 복합 조건 True/False |
-| FB-43 | L1 | !status_flags.local_position_invalid or ((mode_req_local_position & mode_mask) == 0) | 로컬 위치 요구사항 검사 | 복합 조건 True/False |
-| FB-44 | L1 | !status_flags.local_position_invalid_relaxed or ((mode_req_local_position_relaxed & mode_mask) == 0) | 완화된 로컬 위치 요구사항 | 복합 조건 True/False |
-| FB-45 | L1 | !status_flags.global_position_invalid or ((mode_req_global_position & mode_mask) == 0) | 글로벌 위치 요구사항 검사 | 복합 조건 True/False |
-| FB-46 | L1 | !status_flags.local_altitude_invalid or ((mode_req_local_alt & mode_mask) == 0) | 로컬 고도 요구사항 검사 | 복합 조건 True/False |
-| FB-47 | L1 | !status_flags.auto_mission_missing or ((mode_req_mission & mode_mask) == 0) | 자동 미션 요구사항 검사 | 복합 조건 True/False |
-| FB-48 | L1 | !status_flags.offboard_control_signal_lost or ((mode_req_offboard_signal & mode_mask) == 0) | Offboard 신호 요구사항 검사 | 복합 조건 True/False |
-| FB-49 | L1 | !status_flags.home_position_invalid or ((mode_req_home_position & mode_mask) == 0) | 홈 위치 요구사항 검사 | 복합 조건 True/False |
-| FB-50 | L1 | ((status_flags.mode_req_other & mode_mask) == 0) | 기타 모드 요구사항 검사 | True/False |
+:::
 
-#### F. deferFailsafes() - 페일세이프 지연 제어 (L1-L2)
+### 2.4 FailsafeBase 함수
+
+:::details 1. FailsafeBase::update()
+
+- **위치**: framework.cpp:53-108
+- **분기 레벨**: 3단계 (중첩 if문)
+- **커버리지 요구사항**: 6개 분기 만족
+
 **분기 구조 분석:**
+
 ```
-L1: if (enabled && _selected_action > Action::Warn)
-    return false
-L1: if (timeout_s == 0)
-L1: else if (timeout_s < 0)  
-L1: else
-```
-
-| ID | Level | 분기 조건 | 설명 | 커버리지 요구사항 |
-|:--:|:-----:|---------|-----|:----------------:|
-| FB-51 | L1 | enabled && _selected_action > Action::Warn | 활성화 실패 조건 | True/False 모두 필요 |
-| FB-52 | L1 | timeout_s == 0 | 기본 타임아웃 사용 | True/False 모두 필요 |
-| FB-53 | L1 | timeout_s < 0 | 무한 타임아웃 설정 | True/False 모두 필요 |
-
-## 분기 통계 요약
-
-### 전체 분기 통계
-- **총 분기 수**: 103개 (FS: 59개, FB: 44개)
-- **최대 중첩 레벨**: 5단계 (checkFailsafe 함수의 UserTakeoverAllowed 처리)
-- **복잡도가 높은 함수들**:
-  1. `getSelectedAction()` - 40개 분기 (FB-22 ~ FB-40)
-  2. `checkStateAndMode()` - 12개 분기 (FS-35 ~ FS-46)
-  3. `checkFailsafe()` - 12개 분기 (FB-10 ~ FB-21)
-  4. `checkModeFallback()` - 9개 분기 (FS-49 ~ FS-57)
-
-### 레벨별 분기 분포
-- **L1 분기**: 67개 (65%)
-- **L2 분기**: 21개 (20%)
-- **L3 분기**: 11개 (11%)
-- **L4 분기**: 3개 (3%)
-- **L5 분기**: 1개 (1%)
-
-### 분기 유형 분석
-- **Switch 문**: 41개 (40%) - 파라미터 변환 함수들
-- **If/Else 문**: 50개 (48%) - 상태 검사 로직들  
-- **복합 조건**: 12개 (12%) - modeCanRun, 복잡한 논리 조건들
-
-이 분기 분석을 바탕으로 Failsafe 모듈의 모든 실행 경로를 체계적으로 테스트할 수 있는 기반이 마련되었습니다.
-
-## 2. 타겟보드를 통한 분기 커버리지 검증
-
-### 2.1 HIL 환경 구성
-
-#### HIL 테스트 환경 구성도
-```mermaid
-graph TD
-    A[QGroundControl] --> B[SITL/HIL Instance]
-    B --> C[PX4 Failsafe Module]
-    C --> D[Status Monitor]
-    E[MAVLink Commands] --> B
-    F[Simulation Scenarios] --> B
-    G[Automated Test Scripts] --> B
-    H[Branch Coverage Tool] --> D
-    
-    subgraph "타겟 하드웨어"
-        I[Pixhawk 6C]
-        J[텔레메트리 모듈]
-        K[GPS 모듈]
-        L[RC 수신기]
-    end
-    
-    B --> I
-    I --> J
-    I --> K
-    I --> L
+L1: if(_last_update == 0) - 첫 번째 업데이트
+L1: if(arming_state_changed) - 아밍 상태 변화
+L1: if(user_intended_mode_updated || _user_takeover_active) - 모드 업데이트
+L1: if(defer_timeout_check) - Failsafe 지연 타임아웃
+L1: if(_failsafe_defer_started == 0) - Failsafe 지연 시작 안됨
+L1: if(notification_required) - 사용자 알림 필요
 ```
 
-#### 테스트 환경 세부사항
-- **HIL 플랫폼**: PX4 SITL with Gazebo
-- **타겟 보드**: Pixhawk 6C (STM32H7 기반)
-- **통신**: MAVLink 2.0 over USB/UART
-- **시뮬레이션**: jMAVSim + Gazebo Garden
-- **커버리지 도구**: GCOV + LCOV
+:::
 
-### 2.2 HIL 시험 케이스 정의
+:::details 2. updateFailsafeDeferState()
 
-#### 2.2.1 배터리 페일세이프 테스트 (FS-38~FS-44)
+- **위치**: framework.cpp:109-120
+- **분기 레벨**: 1단계 (if문)
+- **커버리지 요구사항**: 2개 분기 만족
 
-**테스트 시나리오 1: 배터리 경고 레벨 전환**
-```bash
-# 테스트 스크립트: battery_failsafe_test.sh
-#!/bin/bash
+**분기 구조 분석:**
 
-# 초기 설정
-mavlink_shell.py --baudrate 57600 --device /dev/ttyUSB0 << 'EOF'
-param set COM_LOW_BAT_ACT 2  # Land mode
-param set BAT_LOW_THR 0.3    # 30% 경고
-param set BAT_CRIT_THR 0.15  # 15% 위험
-param set BAT_EMERGEN_THR 0.05  # 5% 비상
-commander arm
-EOF
-
-# 배터리 레벨 시뮬레이션
-python3 << 'EOF'
-import time
-from pymavlink import mavutil
-
-# MAVLink 연결
-master = mavutil.mavlink_connection('/dev/ttyUSB0', baud=57600)
-
-# 배터리 상태 시뮬레이션
-battery_levels = [0.8, 0.5, 0.29, 0.14, 0.04]  # 정상 -> 낮음 -> 위험 -> 비상
-for level in battery_levels:
-    # BATTERY_STATUS 메시지 전송
-    master.mav.battery_status_send(
-        id=0,
-        battery_function=0,  # BATTERY_FUNCTION_ALL
-        type=0,             # BATTERY_TYPE_UNKNOWN  
-        temperature=250,     # 25.0°C
-        voltages=[int(level * 4200)] * 10,  # mV
-        current_battery=-500,  # -5A (방전)
-        current_consumed=1000, # 1Ah 소모
-        energy_consumed=-1,
-        battery_remaining=int(level * 100),  # 퍼센트
-        time_remaining=int(level * 3600),    # 초
-        charge_state=2,      # CHARGING_STATE_DISCHARGING
-        voltages_ext=[0]*4,
-        mode=0,
-        fault_bitmask=0
-    )
-    time.sleep(5)  # 5초 간격
-EOF
+```
+L1: if(defer && _failsafe_defer_started == 0) - 지연 시작 조건
 ```
 
-**커버되는 분기:**
-- FS-38: `battery_warning == LOW` (True)
-- FS-39: `battery_warning == CRITICAL` (True)  
-- FS-40: `battery_warning == EMERGENCY` (True)
-- FS-41: `LowBatteryAction::Land` (True)
-- FS-42: `LowBatteryAction::Return` (True)
-- FS-43: `LowBatteryAction::ReturnOrLand` (True)
-- FS-44: `LowBatteryAction::Warning` (True)
+:::
 
-**예상 결과:**
-1. 30% → Warn 메시지
-2. 15% → Land 모드 활성화
-3. 5% → 강제 Land 모드
+:::details 3. updateStartDelay()
 
-#### 2.2.2 RC 연결 손실 테스트 (FS-01~FS-07)
+- **위치**: framework.cpp:121-142
+- **분기 레벨**: 2단계 (중첩 if문)
+- **커버리지 요구사항**: 3개 분기 만족
+- 해당 분기:
 
-**테스트 시나리오 2: RC 링크 손실 시뮬레이션**
-```python
-# rc_loss_test.py
-import time
-from pymavlink import mavutil
+**분기 구조 분석:**
 
-def test_rc_loss_scenario():
-    master = mavutil.mavlink_connection('/dev/ttyUSB0', baud=57600)
-    
-    # RC 연결 활성 상태
-    master.mav.rc_channels_send(
-        time_boot_ms=int(time.time() * 1000),
-        chancount=8,
-        chan1_raw=1500,  # 중앙값
-        chan2_raw=1500,
-        chan3_raw=1000,  # 스로틀 최소
-        chan4_raw=1500,
-        chan5_raw=1000,  # 기타 채널들
-        chan6_raw=1000,
-        chan7_raw=1000,
-        chan8_raw=1000,
-        rssi=255
-    )
-    
-    time.sleep(10)  # 10초 대기
-    
-    # RC 연결 손실 시뮬레이션 (메시지 전송 중단)
-    print("RC 링크 손실 시뮬레이션 시작...")
-    time.sleep(30)  # 30초간 RC 메시지 없음
-    
-    # 연결 복구
-    master.mav.rc_channels_send(
-        time_boot_ms=int(time.time() * 1000),
-        chancount=8,
-        chan1_raw=1500,
-        chan2_raw=1500,
-        chan3_raw=1200,  # 스로틀 증가
-        chan4_raw=1500,
-        chan5_raw=1000,
-        chan6_raw=1000,
-        chan7_raw=1000,
-        chan8_raw=1000,
-        rssi=255
-    )
-
-if __name__ == "__main__":
-    test_rc_loss_scenario()
+```
+L1: if(delay_active) - 지연 활성화 상태
+    L2: if(_current_delay > dt) - 지연 시간 남음
+L1: else - 지연 비활성화
 ```
 
-**커버되는 분기:**
-- FS-01: `gcs_connection_loss_failsafe_mode::Disabled` (False)
-- FS-02: `gcs_connection_loss_failsafe_mode::Hold_mode` (True)
-- FS-03: `gcs_connection_loss_failsafe_mode::Return_mode` (True)
-- FS-04: `gcs_connection_loss_failsafe_mode::Land_mode` (False)
+:::
 
-#### 2.2.3 지오펜스 위반 테스트 (FS-08~FS-14)
+:::details 4. updateDelay()
 
-**테스트 시나리오 3: 지오펜스 경계 위반**
-```python
-# geofence_test.py
-def test_geofence_violation():
-    master = mavutil.mavlink_connection('/dev/ttyUSB0', baud=57600)
-    
-    # 지오펜스 설정
-    home_lat = 47.3977420  # 취리히 공항
-    home_lon = 8.5455940
-    fence_radius = 100     # 100m 반경
-    
-    # 정상 위치 (펜스 내부)
-    master.mav.global_position_int_send(
-        time_boot_ms=int(time.time() * 1000),
-        lat=int(home_lat * 1e7),
-        lon=int(home_lon * 1e7), 
-        alt=int(50 * 1000),      # 50m MSL
-        relative_alt=int(50 * 1000),  # 50m AGL
-        vx=0, vy=0, vz=0,
-        hdg=0
-    )
-    
-    time.sleep(5)
-    
-    # 펜스 위반 위치 (150m 떨어진 곳)
-    violation_lat = home_lat + (150 / 111320)  # 위도 오프셋
-    master.mav.global_position_int_send(
-        time_boot_ms=int(time.time() * 1000),
-        lat=int(violation_lat * 1e7),
-        lon=int(home_lon * 1e7),
-        alt=int(50 * 1000),
-        relative_alt=int(50 * 1000),
-        vx=500,  # 5m/s 북쪽으로
-        vy=0, vz=0,
-        hdg=0
-    )
-    
-    time.sleep(10)  # 10초간 위반 상태 유지
+- **위치**: framework.cpp:149-158
+- **분기 레벨**: 1단계 (if문)
+- **커버리지 요구사항**: 2개 분기 만족
+
+**분기 구조 분석:**
+
+```
+L1: if(_current_delay > 0) - 지연 중인 상태
 ```
 
-**커버되는 분기:**
-- FS-08: `geofence_violation_action::None` (False)
-- FS-09: `geofence_violation_action::Warning` (False)
-- FS-10: `geofence_violation_action::Hold_mode` (True)
-- FS-11: `geofence_violation_action::Return_mode` (False)
+:::
 
-### 2.3 시험 절차와 만족하는 분기
+:::details 5. removeActions()
 
-#### 2.3.1 자동화된 테스트 실행 흐름
+- **위치**: framework.cpp:159-170
+- **분기 레벨**: 2단계 (중첩 for + if문)
+- **커버리지 요구사항**: 2개 분기 만족
 
-```mermaid
-flowchart TD
-    A[테스트 시작] --> B[HIL 환경 초기화]
-    B --> C[분기 커버리지 모니터링 시작]
-    C --> D[시나리오 1: 배터리 테스트]
-    D --> E[분기 FS-38~FS-44 검증]
-    E --> F[시나리오 2: RC 손실 테스트]
-    F --> G[분기 FS-01~FS-07 검증]
-    G --> H[시나리오 3: 지오펜스 테스트]
-    H --> I[분기 FS-08~FS-14 검증]
-    I --> J[전체 커버리지 리포트 생성]
-    J --> K[테스트 완료]
-    
-    style E fill:#90EE90
-    style G fill:#90EE90
-    style I fill:#90EE90
+**분기 구조 분석:**
+
+```
+for(action in _actions)
+    L1: if(action.clear_condition == condition) - 조건 일치하는 액션
 ```
 
-#### 2.3.2 분기 커버리지 검증 매트릭스
+:::
 
-| 테스트 시나리오 | 타겟 분기 | 검증 방법 | 통과 기준 |
-|:-------------:|:--------:|:--------:|:--------:|
-| 배터리 페일세이프 | FS-38~FS-44 (7개) | BATTERY_STATUS 메시지 주입 | 모든 경고 레벨 반응 |
-| RC 연결 손실 | FS-01~FS-07 (7개) | RC_CHANNELS 메시지 중단 | 설정된 액션 실행 |
-| 지오펜스 위반 | FS-08~FS-14 (7개) | GLOBAL_POSITION_INT 메시지 | 경계 위반 감지 및 반응 |
-| GCS 연결 손실 | FS-01~FS-07 (재사용) | MAVLink heartbeat 중단 | 통신 두절 처리 |
-| 모드 폴백 | FB-28~FB-44 (17개) | MODE_REQ 플래그 조작 | 안전한 모드 전환 |
+:::details 6. notifyUser()
 
-#### 2.3.3 레벨별 분기 달성률 목표
+- **위치**: framework.cpp:171-284
+- **분기 레벨**: 4단계 (복잡한 중첩 구조)
+- **커버리지 요구사항**: 15개 분기 만족
 
-| 레벨 | 분기 수 | 목표 달성률 | 검증 방법 |
-|:----:|:------:|:-----------:|:--------:|
-| L1 | 72개 | 100% | 모든 switch case 커버 |
-| L2 | 26개 | 95% | 중첩 if문 조건 테스트 |
-| L3 | 11개 | 90% | 복합 조건 시나리오 |
-| L4 | 3개 | 85% | 깊은 중첩 케이스 |
-| L5 | 1개 | 80% | 최대 복잡도 케이스 |
+**주요 분기 구조 분석:**
 
-### 2.4 HIL 테스트 결과 및 분석
-
-#### 2.4.1 실시간 분기 모니터링 대시보드
-
-```bash
-# coverage_monitor.sh - 실시간 커버리지 모니터링
-#!/bin/bash
-
-echo "=== PX4 Failsafe 분기 커버리지 모니터링 ==="
-
-while true; do
-    clear
-    echo "현재 시간: $(date)"
-    echo "===========================================" 
-    
-    # GCOV 데이터 수집
-    gcov /home/px4/src/modules/commander/failsafe/*.cpp
-    
-    # 분기별 커버리지 상태
-    echo "분기 커버리지 현황:"
-    lcov --capture --directory . --output-file coverage.info
-    lcov --list coverage.info | grep -E "(FS-|FB-)[0-9]+"
-    
-    # 실시간 통계
-    COVERED=$(lcov --list coverage.info | grep -c "100.0%")
-    TOTAL=103
-    PERCENTAGE=$(echo "scale=1; $COVERED * 100 / $TOTAL" | bc)
-    
-    echo "===========================================" 
-    echo "전체 진행률: $COVERED/$TOTAL ($PERCENTAGE%)"
-    echo "===========================================" 
-    
-    sleep 2
-done
+```
+L1: switch(action) - 액션 타입별 메시지
+    case Hold/RTL/Land/Descend/Disarm/Terminate:
+L1: switch(cause) - 원인별 상세 메시지
+    case ManualControlLoss/GCSConnectionLoss/BatteryLow/etc:
+L1: if(delayed_action != Action::None) - 지연된 액션 존재
+L1: mavlink_log 메시지 전송 분기들
 ```
 
-#### 2.4.2 테스트 완료 시 예상 결과
+:::
 
-**최종 분기 커버리지 리포트:**
+:::details 7. checkFailsafe()
+
+- **위치**: framework.cpp:285-380
+- **분기 레벨**: 4단계 (복잡한 조건문)
+- **커버리지 요구사항**: 12개 분기 만족
+
+**주요 분기 구조 분석:**
+
 ```
-=== PX4 Failsafe Module Branch Coverage Report ===
-Total Branches: 103
-Covered Branches: 98 (95.1%)
-
-Level Breakdown:
-- L1: 72/72 (100.0%) ✓
-- L2: 24/26 (92.3%) ⚠
-- L3: 10/11 (90.9%) ⚠  
-- L4: 2/3 (66.7%) ⚠
-- L5: 0/1 (0.0%) ✗
-
-Critical Paths Covered:
-✓ 배터리 페일세이프 모든 레벨
-✓ RC/GCS 연결 손실 처리
-✓ 지오펜스 위반 대응
-✓ 모드 폴백 메커니즘
-⚠ 극한 상황 조합 (일부 미달성)
-
-Uncovered Branches:
-- FB-35: 매우 복잡한 중첩 조건 (실제 발생 가능성 낮음)
-- FB-43: 하드웨어 의존적 분기
-- FS-25: 레거시 파라미터 조합
+L1: if(!options.valid()) - 유효하지 않은 옵션
+L1: if(caller_id < 0 || caller_id >= max_num_actions) - ID 범위 검사
+L1: if(last_state_failure != cur_state_failure) - 상태 변화 검사
+L1: if(cur_state_failure) - 현재 실패 상태
+    L2: if(!last_state_failure) - 새로운 실패
+        L3: if(options.can_be_deferred && _defer_failsafes) - 지연 가능
+L1: if(!cur_state_failure && last_state_failure) - 실패 해제
 ```
 
-이 HIL 테스트 프레임워크를 통해 Failsafe 모듈의 95% 이상 분기 커버리지를 달성하고, 실제 비행 환경에서 발생 가능한 대부분의 페일세이프 시나리오에 대한 안전성을 검증할 수 있습니다.
+:::
+
+:::details 8. removeAction()
+
+- **위치**: framework.cpp:381-397
+- **분기 레벨**: 2단계 (switch + if문)
+- **커버리지 요구사항**: 5개 분기 만족
+
+**분기 구조 분석:**
+
+```
+L1: switch(action.clear_condition) - 클리어 조건별 처리
+    case WhenConditionClears:
+    case OnModeChangeOrDisarm:
+    case OnDisarm:
+    case Never:
+```
+
+:::
+
+:::details 9. removeNonActivatedActions()
+
+- **위치**: framework.cpp:399-409
+- **분기 레벨**: 2단계 (for + if문)
+- **커버리지 요구사항**: 2개 분기 만족
+
+**분기 구조 분석:**
+
+```
+for(action in _actions)
+    L1: if(!action.activated && action.valid()) - 비활성화된 유효 액션
+```
+
+:::
+
+:::details 10. getSelectedAction()
+
+- **위치**: framework.cpp:411-508
+- **분기 레벨**: 4단계 (복잡한 선택 로직)
+- **커버리지 요구사항**: 20개 분기 만족
+
+**주요 분기 구조 분석:**
+
+```
+L1: for(action in _actions) - 모든 액션 검사
+    L2: if(action.valid()) - 유효한 액션
+        L3: if(action > selected_action) - 우선순위 높은 액션
+L1: if(selected_action != Action::None) - 액션 선택됨
+    L2: if(allow_user_takeover conditions) - 사용자 접수 허용 조건들
+    L2: if(rc_sticks_takeover_request) - RC 스틱 접수 요청
+L1: mode fallback 처리 분기들
+```
+
+:::
+
+:::details 11. clearDelayIfNeeded()
+
+- **위치**: framework.cpp:510-525
+- **분기 레벨**: 2단계 (중첩 if문)
+- **커버리지 요구사항**: 4개 분기 만족
+
+**분기 구조 분석:**
+
+```
+L1: if(_current_delay > 0) - 지연 중
+    L2: if(state.user_intended_mode changed) - 모드 변경
+    L2: if(no active actions) - 활성 액션 없음
+```
+
+:::
+
+:::details 12. actionAllowsUserTakeover()
+
+- **위치**: framework.cpp:527-541
+- **분기 레벨**: 1단계 (switch문)
+- **커버리지 요구사항**: 8개 분기 만족
+
+**분기 구조 분석:**
+
+```
+L1: switch(action) - 액션별 사용자 접수 허용 여부
+    case None/Warn: return true
+    case Hold/RTL/Land/Descend: return true  
+    case Disarm/Terminate: return false
+```
+
+:::
+
+:::details 13. modeFromAction()
+
+- **위치**: framework.cpp:543-578
+- **분기 레벨**: 2단계 (switch문)
+- **커버리지 요구사항**: 10개 분기 만족
+
+**분기 구조 분석:**
+
+```
+L1: switch(action) - 액션을 모드로 변환
+    case None/Warn: return user_intended_mode
+    case FallbackPosCtrl: return POSCTL
+    case FallbackAltCtrl: return ALTCTL
+    case FallbackStab: return STAB
+    case Hold: return AUTO_LOITER
+    case RTL: return AUTO_RTL
+    case Land: return AUTO_LAND
+    case Descend: return DESCEND
+    case Disarm/Terminate: return user_intended_mode
+```
+
+:::
+
+:::details 14. modeCanRun()
+
+- **위置**: framework.cpp:580-605
+- **분기 레벨**: 3단계 (복잡한 비트 연산)
+- **커버리지 요구사항**: 8개 분기 만족
+
+**분기 구조 분석:**
+
+```
+L1: if(mode >= NAVIGATION_STATE_MAX) - 모드 범위 검사
+L1: mode 그룹별 can_run 비트마스크 검사
+    L2: 각 모드 그룹에 대한 비트 연산
+    L2: 특수 모드들에 대한 개별 처리
+```
+
+:::
+
+:::details 15. deferFailsafes()
+
+- **위치**: framework.cpp:607-623
+- **분기 레벨**: 2단계 (중첩 if문)
+- **커버리지 요구사항**: 4개 분기 만족
+
+**분기 구조 분석:**
+
+```
+L1: if(enabled) - 지연 활성화
+    L2: if(inFailsafe()) - 이미 failsafe 중
+L1: else - 지연 비활성화
+```
+
+:::
+
+## 3. 시험 환경 및 데이터 출처
+
+### 3.1 하드웨어/소프트웨어 구성도
+
+- **체계통합 시험 환경**: FMS HILS 환경 상에서 타겟 보드(전체 펌웨어 업로드) 운용.
+- **SITL (Software In The Loop)**: Gazebo 시뮬레이션 환경
+- **HITL (Hardware In The Loop)**: 실제 하드웨어와 시뮬레이션 조합
+
+### 3.2 입력 데이터 출처
+
+::: details Commander Module
+
+- **vehicle_status**: Commander 모듈 - 상태 정보
+- **failsafe_flags_s**: Commander 모듈 - failsafe 조건 플래그들
+  :::
+
+::: details uORB MSG
+
+- **vehicle_command**: uORB - 비행체 명령
+- **battery_status**: uORB - 배터리 상태 정보
+- **mission_result**: uORB - 미션 실행 결과
+- **geofence_result**: uORB - 지오펜스 위반 상태
+  :::
+
+::: details Parameter
+
+- **NAV_DLL_ACT**: GCS 연결 손실 액션
+- **NAV_RCL_ACT**: RC 연결 손실 액션
+- **COM_RCL_EXCEPT**: RC 손실 예외 조건
+- **COM_RC_IN_MODE**: RC 입력 모드 설정
+- **GF_ACTION**: 지오펜스 위반 액션
+- **COM_LOW_BAT_ACT**: 배터리 저전압 액션
+- **COM_IMB_PROP_ACT**: 불균형 프로펠러 액션
+- **COM_ACT_FAIL_ACT**: 액추에이터 고장 액션
+  :::
+
+### 3.3 외부 조작 방법
+
+- **MAVLink 명령**: GCS SW에서 명령 인가
+- **Parameter 변경**: GCS SW에서 변경
+- **RC 신호 조작**: RC 송신기 ON/OFF
+
+### 3.4 출력 데이터
+
+- **failsafe_flags**: uORB failsafe 상태 플래그
+- **vehicle_command_ack**: uORB 비행체 명령 확인
+- **로그 데이터**: failsafe 상태 및 액션 이력 확인
+- **GCS SW**: GCS SW에서 출력되는 failsafe 메시지 확인
+
+### 3.5 권장사항
+
+1. **Dynamic Testing**: COVER 분기들에 대해 운용 시나리오 기반 테스트 우선 수행
+2. **Static Analysis**: STATIC 분기들에 대해 탐침코드를 통한 직접 검증 필요
+3. **Coverage Tools**: gcov/lcov를 활용한 실제 코드 커버리지 측정 병행
+
+## 4. 시나리오(Test Case) 수립 및 분기 커버 분류
+
+### 4.1 COVER (시뮬레이션 가능) 시나리오
+
+:::details TC-01 : RC 신호 손실 failsafe
+
+- **목적**: RC 신호 손실 시 설정된 failsafe 액션 동작 확인
+
+::: info **시험 입력자료**
+
+- **입력 자료**
+  - (commander) failsafe_flags_s.manual_control_signal_lost
+  - (param) NAV_RCL_ACT, COM_RCL_EXCEPT
+- **입력 값 실제자료 여부**
+  - (commander) failsafe_flags_s : 실제 자료
+  - (param) NAV_RCL_ACT, COM_RCL_EXCEPT : 실제 자료
+- **시험입력 사용방법**
+  - (commander) Commander 모듈에서 failsafe_flags 데이터 수신
+  - (param) GCS SW에서 매개변수 값 입력
+- **시험 입력 순서**
+  - GCS SW에서 NAV_RCL_ACT '3' (Return 모드) 값 입력
+  - RC 송신기 OFF로 manual_control_signal_lost = true 상태 생성
+
+::: info **상세 시험절차**
+
+1. GCS SW에서 FCS의 로그 기록 시작
+2. GCS SW에서 NAV_RCL_ACT '3' (Return 모드) 값 입력
+3. 드론 아밍 및 이륙
+4. RC 송신기 정상 상태에서 failsafe 상태 False 확인
+5. RC 송신기 OFF로 manual_control_signal_lost = true 생성
+6. GCS SW에서 RTL 모드 전환 및 failsafe 활성화 확인
+7. RC 송신기 ON으로 신호 복구
+8. 사용자 모드 전환 가능성 확인 (User takeover)
+9. GCS SW에서 FCS의 로그 기록 종료
+
+::: info **시험 예상결과**
+
+- **시험결과 출력 자료**
+  - 로그 자료에서 selectedAction() = RTL 확인
+  - 로그 자료에서 inFailsafe() = true 확인
+- **시험결과 승인 범위**
+  - failsafe 활성화: inFailsafe() = true
+  - 액션 실행: selectedAction() = RTL
+- **시험결과 입출력 조건**
+  1. manual_control_signal_lost = false → inFailsafe() = false
+  2. manual_control_signal_lost = true → inFailsafe() = true, selectedAction() = RTL
+
+:::
+
+:::details TC-02 : 배터리 경고 단계별 failsafe
+
+- **목적**: 배터리 경고 레벨별 차등화된 failsafe 액션 동작 확인
+
+::: info **시험 입력자료**
+
+- **입력 자료**
+  - (uORB) battery_status.warning
+  - (param) COM_LOW_BAT_ACT
+- **시험 입력 순서**
+  - GCS SW에서 COM_LOW_BAT_ACT '3' (ReturnOrLand) 값 입력
+  - SITL에서 배터리 레벨 단계적 감소 시뮬레이션
+
+::: info **상세 시험절차**
+
+1. GCS SW에서 COM_LOW_BAT_ACT '3' (ReturnOrLand) 설정
+2. 드론 아밍 및 이륙
+3. SITL에서 battery_warning = LOW 설정 → Warn 액션 확인
+4. SITL에서 battery_warning = CRITICAL 설정 → RTL 액션 확인
+5. SITL에서 battery_warning = EMERGENCY 설정 → Land 액션 확인
+6. 각 단계별 failsafe 동작 및 액션 전환 확인
+
+:::
+
+:::details TC-03 : 지오펜스 위반 failsafe
+
+- **목적**: 지오펜스 경계 위반 시 설정된 액션 실행 확인
+
+::: info **시험 입력자료**
+
+- **입력 자료**
+  - (uORB) geofence_result.geofence_breached
+  - (param) GF_ACTION
+- **입력 값 실제자료 여부**
+  - (uORB) geofence_result : 실제 자료
+  - (param) GF_ACTION : 실제 자료
+- **시험입력 사용방법**
+  - (uORB) Geofence 모듈에서 지오펜스 위반 상태 수신
+  - (param) GCS SW에서 매개변수 값 입력
+- **시험 입력 순서**
+  - GCS SW에서 지오펜스 설정 및 GF_ACTION '3' (Return) 값 입력
+  - 드론을 지오펜스 경계 밖으로 비행
+
+::: info **상세 시험절차**
+
+1. GCS SW에서 FCS의 로그 기록 시작
+2. GCS SW에서 지오펜스 영역 설정 (반경 100m 원형 지오펜스)
+3. GCS SW에서 GF_ACTION '3' (Return 모드) 값 입력
+4. 드론 아밍 및 이륙
+5. 지오펜스 내부에서 failsafe 상태 False 확인
+6. 드론을 지오펜스 경계 밖으로 비행하여 geofence_breached = true 생성
+7. GCS SW에서 RTL 모드 전환 및 failsafe 활성화 확인
+8. 드론이 지오펜스 내부로 복귀 시 failsafe 해제 확인
+9. GCS SW에서 FCS의 로그 기록 종료
+
+::: info **시험 예상결과**
+
+- **시험결과 출력 자료**
+  - 로그 자료에서 selectedAction() = RTL 확인
+  - 로그 자료에서 inFailsafe() = true 확인
+- **시험결과 승인 범위**
+  - failsafe 활성화: inFailsafe() = true
+  - 액션 실행: selectedAction() = RTL
+- **시험결과 입출력 조건**
+  1. geofence_breached = false → inFailsafe() = false
+  2. geofence_breached = true → inFailsafe() = true, selectedAction() = RTL
+
+:::
+
+:::details TC-04 : GCS 연결 손실 failsafe
+
+- **목적**: GCS 연결 손실 시 설정된 failsafe 액션 동작 확인
+
+::: info **시험 입력자료**
+
+- **입력 자료**
+  - (commander) failsafe_flags_s.gcs_connection_lost
+  - (param) NAV_DLL_ACT
+- **입력 값 실제자료 여부**
+  - (commander) failsafe_flags_s : 실제 자료
+  - (param) NAV_DLL_ACT : 실제 자료
+- **시험입력 사용방법**
+  - (commander) Commander 모듈에서 failsafe_flags 데이터 수신
+  - (param) GCS SW에서 매개변수 값 입력
+- **시험 입력 순서**
+  - GCS SW에서 NAV_DLL_ACT '2' (Hold 모드) 값 입력
+  - GCS 통신 연결 중단으로 gcs_connection_lost = true 상태 생성
+
+::: info **상세 시험절차**
+
+1. GCS SW에서 FCS의 로그 기록 시작
+2. GCS SW에서 NAV_DLL_ACT '2' (Hold 모드) 값 입력
+3. 드론 아밍 및 이륙
+4. GCS 연결 정상 상태에서 failsafe 상태 False 확인
+5. GCS 통신 케이블 분리 또는 네트워크 차단으로 gcs_connection_lost = true 생성
+6. 드론에서 AUTO_LOITER 모드 전환 및 failsafe 활성화 확인
+7. GCS 연결 복구 시 failsafe 해제 확인
+8. 사용자 모드 전환 가능성 확인
+9. GCS SW에서 FCS의 로그 기록 종료
+
+::: info **시험 예상결과**
+
+- **시험결과 출력 자료**
+  - 로그 자료에서 selectedAction() = Hold 확인
+  - 로그 자료에서 inFailsafe() = true 확인
+- **시험결과 승인 범위**
+  - failsafe 활성화: inFailsafe() = true
+  - 액션 실행: selectedAction() = Hold
+- **시험결과 입출력 조건**
+  1. gcs_connection_lost = false → inFailsafe() = false
+  2. gcs_connection_lost = true → inFailsafe() = true, selectedAction() = Hold
+
+:::
+
+:::details TC-05 : 미션 실패 failsafe
+
+- **목적**: 자동 미션 실행 실패 시 설정된 failsafe 액션 동작 확인
+
+::: info **시험 입력자료**
+
+- **입력 자료**
+  - (uORB) mission_result.failure
+  - (commander) failsafe_flags_s.mission_failure
+  - (param) COM_QC_ACT (Quad-chute 액션)
+- **입력 값 실제자료 여부**
+  - (uORB) mission_result : 실제 자료
+  - (commander) failsafe_flags_s : 실제 자료
+  - (param) COM_QC_ACT : 실제 자료
+- **시험입력 사용방법**
+  - (uORB) Mission 모듈에서 미션 실패 상태 수신
+  - (param) GCS SW에서 매개변수 값 입력
+- **시험 입력 순서**
+  - GCS SW에서 COM_QC_ACT '1' (Return 모드) 값 입력
+  - AUTO_MISSION 모드에서 미션 실행 중 강제 실패 상황 생성
+
+::: info **상세 시험절차**
+
+1. GCS SW에서 FCS의 로그 기록 시작
+2. GCS SW에서 미션 계획 설정 (웨이포인트 5개)
+3. GCS SW에서 COM_QC_ACT '1' (Return 모드) 값 입력
+4. 드론 아밍 및 AUTO_MISSION 모드 전환
+5. 미션 실행 중 waypoint 도달 불가 상황 발생 (장애물 등)
+6. mission_result.failure = true 및 mission_failure 플래그 확인
+7. 드론에서 RTL 모드 전환 및 failsafe 활성화 확인
+8. 미션 재설정 후 failsafe 해제 확인
+9. GCS SW에서 FCS의 로그 기록 종료
+
+::: info **시험 예상결과**
+
+- **시험결과 출력 자료**
+  - 로그 자료에서 selectedAction() = RTL 확인
+  - 로그 자료에서 inFailsafe() = true 확인
+- **시험결과 승인 범위**
+  - failsafe 활성화: inFailsafe() = true
+  - 액션 실행: selectedAction() = RTL
+- **시험결과 입출력 조건**
+  1. mission_failure = false → inFailsafe() = false
+  2. mission_failure = true → inFailsafe() = true, selectedAction() = RTL
+
+:::
+
+:::details TC-06 : 중요 시스템 고장 failsafe
+
+- **목적**: 중요 센서 고장 시 설정된 failsafe 액션 동작 확인
+
+::: info **시험 입력자료**
+
+- **입력 자료**
+  - (commander) failsafe_flags_s.fd_critical_failure
+  - (param) COM_ACT_FAIL_ACT
+- **입력 값 실제자료 여부**
+  - (commander) failsafe_flags_s : 실제 자료
+  - (param) COM_ACT_FAIL_ACT : 실제 자료
+- **시험입력 사용방법**
+  - (commander) HealthAndArmingChecks에서 중요 고장 상태 수신
+  - (param) GCS SW에서 매개변수 값 입력
+- **시험 입력 순서**
+  - GCS SW에서 COM_ACT_FAIL_ACT '3' (Land 모드) 값 입력
+  - 중요 센서 (IMU, 바로미터 등) 고장 시뮬레이션
+
+::: info **상세 시험절차**
+
+1. GCS SW에서 FCS의 로그 기록 시작
+2. GCS SW에서 COM_ACT_FAIL_ACT '3' (Land 모드) 값 입력
+3. 드론 아밍 및 이륙
+4. SITL에서 IMU 센서 고장 시뮬레이션 (센서 값 이상)
+5. fd_critical_failure 플래그 활성화 확인
+6. 드론에서 AUTO_LAND 모드 전환 및 failsafe 활성화 확인
+7. 긴급 착륙 실행 및 자동 disarm 확인
+8. 센서 복구 후 시스템 정상화 확인
+9. GCS SW에서 FCS의 로그 기록 종료
+
+::: info **시험 예상결과**
+
+- **시험결과 출력 자료**
+  - 로그 자료에서 selectedAction() = Land 확인
+  - 로그 자료에서 inFailsafe() = true 확인
+- **시험결과 승인 범위**
+  - failsafe 활성화: inFailsafe() = true
+  - 액션 실행: selectedAction() = Land
+- **시험결과 입출력 조건**
+  1. fd_critical_failure = false → inFailsafe() = false
+  2. fd_critical_failure = true → inFailsafe() = true, selectedAction() = Land
+
+:::
+
+:::details TC-07 : 바람/비행시간 제한 초과 failsafe
+
+- **목적**: 바람 한계 초과 또는 비행시간 제한 초과 시 설정된 failsafe 액션 동작 확인
+
+::: info **시험 입력자료**
+
+- **입력 자료**
+  - (commander) failsafe_flags_s.wind_limit_exceeded
+  - (commander) failsafe_flags_s.flight_time_limit_exceeded
+  - (param) COM_WIND_MAX, COM_FLT_TIME_MAX
+- **입력 값 실제자료 여부**
+  - (commander) failsafe_flags_s : 실제 자료
+  - (param) COM_WIND_MAX, COM_FLT_TIME_MAX : 실제 자료
+- **시험입력 사용방법**
+  - (commander) Commander 모듈에서 환경 조건 모니터링
+  - (param) GCS SW에서 매개변수 값 입력
+- **시험 입력 순서**
+  - GCS SW에서 바람 한계값 및 비행시간 한계값 설정
+  - SITL에서 강풍 상황 또는 장시간 비행 시뮬레이션
+
+::: info **상세 시험절차**
+
+1. GCS SW에서 FCS의 로그 기록 시작
+2. GCS SW에서 COM_WIND_MAX '10' (10m/s), COM_FLT_TIME_MAX '600' (10분) 설정
+3. 드론 아밍 및 이륙
+4. SITL에서 바람 속도를 15m/s로 설정하여 wind_limit_exceeded = true 생성
+5. 바람 제한 초과 failsafe 활성화 및 RTL 액션 확인
+6. 바람 조건 정상화 후 failsafe 해제 확인
+7. 장시간 비행으로 flight_time_limit_exceeded = true 생성
+8. 비행시간 제한 초과 failsafe 활성화 및 Land 액션 확인
+9. GCS SW에서 FCS의 로그 기록 종료
+
+::: info **시험 예상결과**
+
+- **시험결과 출력 자료**
+  - 바람 제한: selectedAction() = RTL 확인
+  - 비행시간 제한: selectedAction() = Land 확인
+  - 로그 자료에서 inFailsafe() = true 확인
+- **시험결과 승인 범위**
+  - failsafe 활성화: inFailsafe() = true
+  - 적절한 액션 실행
+- **시험결과 입출력 조건**
+  1. wind_limit_exceeded = true → selectedAction() = RTL
+  2. flight_time_limit_exceeded = true → selectedAction() = Land
+
+:::
+
+:::details TC-08 : 모드 폴백 failsafe
+
+- **목적**: 현재 비행 모드 실행 불가 시 안전한 모드로 폴백 동작 확인
+
+::: info **시험 입력자료**
+
+- **입력 자료**
+  - (commander) HealthAndArmingChecks 모드 실행 가능성
+  - (param) COM_POSCTL_NAVL
+  - user_intended_mode 변경 요청
+- **입력 값 실제자료 여부**
+  - (commander) HealthAndArmingChecks : 실제 자료
+  - (param) COM_POSCTL_NAVL : 실제 자료
+- **시험입력 사용방법**
+  - (commander) 모드별 실행 조건 모니터링
+  - (param) GCS SW에서 폴백 정책 설정
+- **시험 입력 순서**
+  - GCS SW에서 COM_POSCTL_NAVL '0' (Altitude_Manual) 설정
+  - GPS 신호 차단으로 Position Control 모드 실행 불가 상황 생성
+
+::: info **상세 시험절차**
+
+1. GCS SW에서 FCS의 로그 기록 시작
+2. GCS SW에서 COM_POSCTL_NAVL '0' (Altitude_Manual) 설정
+3. 드론 아밍 및 Position Control 모드 진입
+4. GPS 신호 차단으로 position control 불가 상황 생성
+5. checkModeFallback() 함수에 의한 모드 폴백 확인
+6. ALTCTL 모드로 폴백 및 동작 확인
+7. ALTCTL도 불가 시 Manual 모드로 최종 폴백 확인
+8. GPS 신호 복구 시 원래 모드 복귀 가능성 확인
+9. GCS SW에서 FCS의 로그 기록 종료
+
+::: info **시험 예상결과**
+
+- **시험결과 출력 자료**
+  - 로그 자료에서 모드 폴백 순서 확인 (POSCTL → ALTCTL → MANUAL)
+  - 각 모드별 실행 가능성 체크 결과
+- **시험결과 승인 범위**
+  - 적절한 폴백 모드 선택
+  - 안전한 모드 전환
+- **시험결과 입출력 조건**
+  1. POSCTL 불가 → ALTCTL 모드 폴백
+  2. ALTCTL 불가 → MANUAL 모드 폴백
+
+:::
+
+:::details TC-09 : 사용자 수동 접수 (User Takeover) 시나리오
+
+- **목적**: Failsafe 활성 중 사용자의 수동 조작으로 failsafe 해제 동작 확인
+
+::: info **시험 입력자료**
+
+- **입력 자료**
+  - RC 스틱 입력 (수동 조작)
+  - 현재 활성화된 failsafe 액션
+  - (param) User takeover 허용 정책
+- **입력 값 실제자료 여부**
+  - RC 스틱 입력 : 실제 자료
+  - failsafe 액션 : 실제 자료
+- **시험입력 사용방법**
+  - RC 송신기를 통한 수동 조작
+  - GCS SW에서 takeover 정책 확인
+- **시험 입력 순서**
+  - RC 손실로 RTL failsafe 활성화
+  - RC 신호 복구 후 수동 스틱 조작으로 takeover 시도
+
+::: info **상세 시험절차**
+
+1. GCS SW에서 FCS의 로그 기록 시작
+2. GCS SW에서 NAV_RCL_ACT '3' (Return 모드) 설정
+3. 드론 아밍 및 이륙 후 RC 송신기 OFF
+4. RTL failsafe 활성화 및 자동 귀환 시작 확인
+5. RC 송신기 ON으로 신호 복구
+6. RC 스틱을 중립 위치에서 벗어나게 조작하여 takeover 시도
+7. userTakeoverActive() = true 및 failsafe 해제 확인
+8. Manual 모드로 전환 및 수동 조작 가능 확인
+9. 다시 스틱 중립 시 원래 모드 복귀 가능성 확인
+10. GCS SW에서 FCS의 로그 기록 종료
+
+::: info **시험 예상결과**
+
+- **시험결과 출력 자료**
+  - 로그 자료에서 userTakeoverActive() = true 확인
+  - 로그 자료에서 inFailsafe() = false 전환 확인
+- **시험결과 승인 범위**
+  - User takeover 활성화
+  - Failsafe 해제 및 수동 조작 복귀
+- **시험결과 입출력 조건**
+  1. RC 스틱 중립 + Failsafe 활성 → inFailsafe() = true
+  2. RC 스틱 조작 + 신호 정상 → userTakeoverActive() = true, inFailsafe() = false
+
+:::
+
+### 4.2 STATIC (탐침코드 필요) 분기
+
+::: details ST-01 : 배터리 경고 파라미터 Edge Case
+
+- **해당 분기**: FS_B_06, FS_B_07
+- **위치**: fromBatteryWarningActParam():215-217
+- **조건**: param_value == ReturnOrLand && battery_warning == CRITICAL
+- **검증 불가 이유**: 정확한 파라미터 값과 경고 레벨 조합의 동시 발생 어려움
+- **탐침코드 필요**: 배터리 경고 레벨 및 파라미터 강제 설정
+  :::
+
+::: details ST-02 : 모드 폴백 복합 조건
+
+- **해당 분기**: FS_M_07
+- **위치**: checkModeFallback():606-609
+- **조건**: POSCTL 불가 && AUTO_LAND 불가 상황
+- **검증 불가 이유**: 다중 모드 동시 불가 상황 시뮬레이션 제한
+- **탐침코드 필요**: modeCanRun() 함수 반환값 강제 설정
+  :::
+
+::: details ST-03 : 아밍 시간 기반 조건
+
+- **해당 분기**: FS_C_13, FS_C_19, FS_C_20
+- **위치**: checkStateAndMode():482-534
+- **조건**: 정밀한 아밍 시간과 스풀업/lockdown 시간 비교
+- **검증 불가 이유**: 시뮬레이션에서 정밀한 시간 제어 어려움
+- **탐침코드 필요**: _armed_time 및 현재 시간 직접 조작
+  :::
+
+### 4.3 분기 커버리지 요약
+
+| 함수명                        | 분기 ID 범위        | 총 분기      | COVER        | STATIC      | 커버리지(%)   |
+| ----------------------------- | ------------------- | ------------ | ------------ | ----------- | ------------- |
+| selectedAction()              | -                   | 1            | 1            | 0           | 100%          |
+| inFailsafe()                  | -                   | 1            | 1            | 0           | 100%          |
+| userTakeoverActive()          | -                   | 1            | 1            | 0           | 100%          |
+| fromNavDllOrRclActParam()     | FS_N_01~08          | 8            | 8            | 0           | 100%          |
+| fromGfActParam()              | FS_G_01~08          | 8            | 8            | 0           | 100%          |
+| fromImbalancedPropActParam()  | FS_I_01~05          | 5            | 5            | 0           | 100%          |
+| fromActuatorFailureActParam() | FS_A_01~06          | 6            | 6            | 0           | 100%          |
+| fromBatteryWarningActParam()  | FS_B_01~07          | 7            | 5            | 2           | 71%           |
+| checkStateAndMode()           | FS_C_01~21          | 21           | 18           | 3           | 86%           |
+| checkModeFallback()           | FS_M_01~08          | 8            | 7            | 1           | 88%           |
+| modifyUserIntendedMode()      | FS_U_01~02          | 2            | 2            | 0           | 100%          |
+| updateArmingState()           | FS_S_01~04          | 4            | 4            | 0           | 100%          |
+| **전체**                | **72개 분기** | **72** | **66** | **6** | **92%** |

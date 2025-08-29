@@ -3,10 +3,10 @@ layout: home
 
 hero:
   name: "Autopilot CORE"
-  text: "Advanced Flight Control System"
+  text: "Flight Control System"
   tagline: "Complete documentation and tools for drone development and analysis"
   image:
-    src: /drone.png
+    src: /autopilot-core.png
     alt: Autopilot CORE
 
 features:
